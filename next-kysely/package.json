@@ -1,0 +1,38 @@
+{
+  "name": "next-kysely",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@cloudflare/next-on-pages": "1.6.3",
+    "@cloudflare/workers-types": "^4.20230922.0",
+    "@types/node": "20.8.0",
+    "@types/react": "18.2.23",
+    "@types/react-dom": "18.2.8",
+    "autoprefixer": "10.4.16",
+    "eslint": "8.50.0",
+    "eslint-config-next": "13.5.3",
+    "eslint-config-prettier": "^9.0.0",
+    "kysely": "^0.26.3",
+    "kysely-d1": "^0.3.0",
+    "next": "13.5.3",
+    "postcss": "8.4.31",
+    "prettier": "3.0.3",
+    "prisma": "^5.3.1",
+    "prisma-kysely": "^1.7.1",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "tailwindcss": "3.3.3",
+    "typescript": "5.2.2"
+  },
+  "packageManager": "pnpm@8.8.0",
+  "prettier": {
+    "semi": false,
+    "printWidth": 100
+  }
+}
