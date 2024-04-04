@@ -14,7 +14,9 @@
     "preview": "npm run build && wrangler pages dev ./build/client",
     "build-cf-types": "wrangler types",
     "format": "pnpm format:sql",
-    "format:sql": "sql-formatter db/schema.sql --fix -c sql-formatterrc.json"
+    "format:sql": "sql-formatter db/schema.sql --fix -c sql-formatterrc.json",
+    "migrate:gen": "bash scripts/generate-migration.sh",
+    "migrate:apply": "wrangler d1 migrations apply remix-kysely-d1 --remote"
   },
   "dependencies": {
     "@remix-run/cloudflare": "^2.8.1",
