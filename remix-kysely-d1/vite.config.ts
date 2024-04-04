@@ -2,9 +2,10 @@ import {
   vitePlugin as remix,
   cloudflareDevProxyVitePlugin as remixCloudflareDevProxy,
 } from "@remix-run/dev";
-import { getLoadContext } from "./load-context";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { getLoadContext } from "./load-context";
 
 export default defineConfig({
   plugins: [
@@ -14,5 +15,6 @@ export default defineConfig({
     }),
     remix(),
     tsconfigPaths(),
+    tailwindcss(),
   ],
 });
