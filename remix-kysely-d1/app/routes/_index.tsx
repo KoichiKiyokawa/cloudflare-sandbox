@@ -3,8 +3,14 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/cloudflare";
-import { Form, useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useEffect, useRef } from "react";
+import { z } from "zod";
+import { FormWithConfirmation } from "~/components/functional/form-with-confirmation";
+import {
+  throwBadRequest,
+  throwMethodNotAllowed,
+} from "~/utils/response.server";
 
 export const meta: MetaFunction = () => {
   return [
@@ -37,24 +43,36 @@ export async function loader({ context }: LoaderFunctionArgs) {
 export async function action({ request, context }: ActionFunctionArgs) {
   const formData = await request.formData();
 
-  if (request.method === "DELETE") {
-    await context.db
-      .deleteFrom("users")
-      .where("id", "=", Number(formData.get("id")))
-      .execute();
-    return { ok: true };
+  switch (request.method) {
+    case "POST": {
+      const result = z
+        .object({ name: z.string().min(1) })
+        .safeParse(Object.fromEntries(formData));
+      if (!result.success) throwBadRequest();
+
+      await context.db
+        .insertInto("users")
+        .values({ name: result.data.name, id: crypto.randomUUID() })
+        .execute();
+
+      return { ok: true };
+    }
+    case "DELETE": {
+      const result = z
+        .object({ id: z.string().uuid() })
+        .safeParse(Object.fromEntries(formData));
+      if (!result.success) throwBadRequest();
+
+      await context.db
+        .deleteFrom("users")
+        .where("id", "=", result.data.id)
+        .execute();
+
+      return { ok: true };
+    }
+    default:
+      throwMethodNotAllowed();
   }
-
-  await context.db
-    .insertInto("users")
-    .values({ name: String(formData.get("name") ?? badRequest()) })
-    .execute();
-
-  return { ok: true };
-}
-
-function badRequest(): never {
-  throw new Response("Bad Request", { status: 400 });
 }
 
 export default function Index() {
@@ -83,17 +101,12 @@ export default function Index() {
         {users.map((user) => (
           <div key={user.id} className="border">
             <pre>{JSON.stringify(user, null, 2)}</pre>
-            <Form
-              method="DELETE"
-              onSubmit={(e) => {
-                if (!confirm("Are you sure?")) e.preventDefault();
-              }}
-            >
+            <FormWithConfirmation method="DELETE">
               <input type="hidden" name="id" value={user.id ?? undefined} />
               <button className="bg-red-500 px-2 text-white rounded">
                 delete
               </button>
-            </Form>
+            </FormWithConfirmation>
           </div>
         ))}
       </div>
