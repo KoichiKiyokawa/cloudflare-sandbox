@@ -30,6 +30,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@ariga/atlas": "0.21.1",
     "@cloudflare/workers-types": "^4.20240329.0",
     "@remix-run/dev": "^2.8.1",
     "@tailwindcss/vite": "4.0.0-alpha.11",

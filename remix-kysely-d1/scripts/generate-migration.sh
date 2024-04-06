@@ -1,13 +1,8 @@
 #!/bin/bash
 
+migration_name=$1
 if [ -z "$1" ]; then
-  echo "Usage: $0 <migration-name>"
-  exit 1
+  read -p "Enter migration name: " migration_name
 fi
 
-# Check if atlas is installed
-if ! command -v atlas &> /dev/null; then
-  brew install ariga/tap/atlas
-fi
-
-atlas migrate diff --to file://db/schema.sql --dev-url "sqlite://file?mode=memory" $1
+pnpm atlas migrate diff --to file://db/schema.sql --dev-url "sqlite://file?mode=memory" $migration_name
