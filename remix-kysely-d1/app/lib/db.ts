@@ -1,5 +1,5 @@
 import { Kysely } from "kysely";
-import { DB } from "kysely-codegen";
+import type { DB } from "kysely-codegen";
 import { D1Dialect } from "kysely-d1";
 
 export const getDb = (db: D1Database) =>

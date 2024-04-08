@@ -1,5 +1,5 @@
-import { GetLoadContextFunction } from "@remix-run/cloudflare-pages";
-import { type PlatformProxy } from "wrangler";
+import type { GetLoadContextFunction } from "@remix-run/cloudflare-pages";
+import type { PlatformProxy } from "wrangler";
 import { getDb } from "./app/lib/db";
 
 type Cloudflare = Omit<PlatformProxy<Env>, "dispose">;

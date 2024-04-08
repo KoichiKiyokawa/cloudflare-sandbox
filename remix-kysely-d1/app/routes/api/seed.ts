@@ -1,4 +1,4 @@
-import { LoaderFunctionArgs, json } from "@remix-run/cloudflare";
+import { type LoaderFunctionArgs, json } from "@remix-run/cloudflare";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   if (process.env.NODE_ENV !== "development") throw Error("Not allowed");

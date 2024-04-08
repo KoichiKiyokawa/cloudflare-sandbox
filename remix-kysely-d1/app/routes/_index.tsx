@@ -94,7 +94,9 @@ export default function Index() {
           name="name"
           disabled={fetcher.state === "submitting"}
         />
-        <button disabled={fetcher.state === "submitting"}>submit</button>
+        <button type="submit" disabled={fetcher.state === "submitting"}>
+          submit
+        </button>
       </fetcher.Form>
 
       <div className="space-y-4">
@@ -103,7 +105,10 @@ export default function Index() {
             <pre>{JSON.stringify(user, null, 2)}</pre>
             <FormWithConfirmation method="DELETE">
               <input type="hidden" name="id" value={user.id ?? undefined} />
-              <button className="bg-red-500 px-2 text-white rounded">
+              <button
+                type="submit"
+                className="bg-red-500 px-2 text-white rounded"
+              >
                 delete
               </button>
             </FormWithConfirmation>

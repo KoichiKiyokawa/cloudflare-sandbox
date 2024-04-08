@@ -5,7 +5,7 @@ tasks:
   deploy:
     cmd: npm run build && wrangler pages deploy ./build/client
   lint:
-    cmd: eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .
+    cmd: pnpm biome lint .
   start:
     cmd: wrangler pages dev ./build/client
   typecheck:
@@ -27,7 +27,10 @@ tasks:
 
   # format
   format:
+    - task: format:ts
     - task: format:sql
+  format:ts:
+    cmd: pnpm biome format . --write
   format:sql:
     cmd: sql-formatter db/schema.sql --fix -c sql-formatterrc.json
 
