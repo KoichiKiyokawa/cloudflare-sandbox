@@ -43,6 +43,9 @@ devDependencies:
   '@cloudflare/workers-types':
     specifier: ^4.20240329.0
     version: 4.20240329.0
+  '@go-task/cli':
+    specifier: 3.35.1
+    version: 3.35.1
   '@remix-run/dev':
     specifier: ^2.8.1
     version: 2.8.1(typescript@5.4.3)(vite@5.2.7)(wrangler@3.43.0)
@@ -1187,6 +1190,18 @@ packages:
   /@fastify/busboy@2.1.1:
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
+
+  /@go-task/cli@3.35.1:
+    resolution: {integrity: sha512-gMu8IyVsPZ29zAQdLtb5BXRPpxiS+qkSeoE0hf7D7YTzRxtYOZPSlrVGETGAA1Y+sOKHU9X0CJFAzJlwiRNh8A==}
+    requiresBuild: true
+    dependencies:
+      '@go-task/go-npm': 0.2.0
+    dev: true
+
+  /@go-task/go-npm@0.2.0:
+    resolution: {integrity: sha512-vQbdtBvesHm8EUFHX8QKg4rbBodmu9VsAXH1ozpbiN5jdTMOYHTCMM31EurAYmY+rNNtxJQ4JGy6t383RPlqbw==}
+    hasBin: true
+    dev: true
 
   /@humanwhocodes/config-array@0.11.14:
     resolution: {integrity: sha512-3T8LkOmg45BV5FICb15QQMsyUSWrQ8AygVfC7ZG32zOalnqrilm018ZVCw0eapXux8FtA33q8PSRSstjee3jSg==}

@@ -1,0 +1,49 @@
+version: '3'
+tasks:
+  build:
+    cmd: remix vite:build
+  deploy:
+    cmd: npm run build && wrangler pages deploy ./build/client
+  lint:
+    cmd: eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .
+  start:
+    cmd: wrangler pages dev ./build/client
+  typecheck:
+    cmd: tsc
+  preview:
+    deps: [build]
+    cmd: wrangler pages dev ./build/client
+
+  # type generation
+  build-cf-types:
+    cmd: wrangler types
+  db-type:gen:
+    desc: Generate db type files
+    cmd: |
+      rm -rf tmp.db
+      sqlite3 tmp.db < db/schema.sql
+      DATABASE_URL=tmp.db pnpm kysely-codegen
+      rm -rf tmp.db
+
+  # format
+  format:
+    - task: format:sql
+  format:sql:
+    cmd: sql-formatter db/schema.sql --fix -c sql-formatterrc.json
+
+  # migrate
+  migrate:gen:
+    desc: Generate migration files
+    cmd: |
+      #!/bin/bash
+      migration_name=$1
+      if [ -z "$1" ]; then
+        read -p "Enter migration name: " migration_name
+      fi
+      pnpm atlas migrate diff --to file://db/schema.sql --dev-url "sqlite://file?mode=memory" $migration_name
+  migrate:apply: 
+    desc: Apply migrations (local)
+    cmd: wrangler d1 migrations apply remix-kysely-d1 --local
+  migrate:apply:prd:
+    desc: Apply migrations (prd)
+    cmd: wrangler d1 migrations apply remix-kysely-d1 --remote

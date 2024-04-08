@@ -4,20 +4,9 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "remix vite:build",
-    "deploy": "npm run build && wrangler pages deploy ./build/client",
+    "prepare": "task db-type:gen",
     "dev": "remix vite:dev",
-    "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
-    "start": "wrangler pages dev ./build/client",
-    "typecheck": "tsc",
-    "typegen": "wrangler types && bash scripts/generate-type-from-db.sh",
-    "preview": "npm run build && wrangler pages dev ./build/client",
-    "build-cf-types": "wrangler types",
-    "format": "pnpm format:sql",
-    "format:sql": "sql-formatter db/schema.sql --fix -c sql-formatterrc.json",
-    "migrate:gen": "bash scripts/generate-migration.sh",
-    "migrate:apply": "wrangler d1 migrations apply remix-kysely-d1 --local",
-    "migrate:apply:prd": "wrangler d1 migrations apply remix-kysely-d1 --remote"
+    "task": "task"
   },
   "dependencies": {
     "@remix-run/cloudflare": "^2.8.1",
@@ -34,6 +23,7 @@
   "devDependencies": {
     "@ariga/atlas": "0.21.1",
     "@cloudflare/workers-types": "^4.20240329.0",
+    "@go-task/cli": "3.35.1",
     "@remix-run/dev": "^2.8.1",
     "@tailwindcss/vite": "4.0.0-alpha.11",
     "@types/react": "^18.2.20",
