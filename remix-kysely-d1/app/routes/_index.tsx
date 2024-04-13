@@ -1,4 +1,10 @@
-import { useForm } from "@conform-to/react";
+import {
+	FormProvider,
+	getInputProps,
+	getTextareaProps,
+	useField,
+	useForm,
+} from "@conform-to/react";
 import { parseWithZod } from "@conform-to/zod";
 import type {
 	ActionFunctionArgs,
@@ -11,6 +17,8 @@ import { z } from "zod";
 import { FormWithConfirmation } from "~/components/functional/form-with-confirmation";
 import { requireCurrentUserId } from "~/features/auth/service.server";
 import { throwMethodNotAllowed } from "~/utils/response.server";
+import cx from "clsx/lite";
+import { ErrorMessageList } from "~/features/auth/components/error-message-list";
 
 export const meta: MetaFunction = () => {
 	return [
@@ -37,9 +45,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 	};
 }
 
+const postTitleMaxLength = 100;
+const postBodyMaxLength = 140;
+
 const postSchema = z.object({
-	title: z.string().min(1),
-	body: z.string().min(1),
+	title: z.string().max(postTitleMaxLength),
+	body: z.string().max(postBodyMaxLength),
 });
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -61,7 +72,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 				})
 				.execute();
 
-			return submission.reply();
+			return submission.reply({ resetForm: true });
 		}
 		case "DELETE": {
 			const submission = parseWithZod(formData, {
@@ -116,24 +127,47 @@ function PostForm() {
 
 	const [form, fields] = useForm({
 		lastResult: fetcher.data,
+		onValidate: ({ formData }) =>
+			parseWithZod(formData, { schema: postSchema }),
+		shouldValidate: "onBlur",
 	});
 
-	useEffect(() => {
-		if (fetcher.state === "idle" && fetcher.data?.error === undefined)
-			// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-			document.forms[form.id as any].reset();
-	}, [fetcher.data?.error, fetcher.state, form.id]);
-
 	return (
-		<fetcher.Form method="POST" id={form.id}>
-			<input
-				type="text"
-				name="name"
-				disabled={fetcher.state === "submitting"}
-			/>
-			<button type="submit" disabled={fetcher.state === "submitting"}>
-				submit
-			</button>
-		</fetcher.Form>
+		<FormProvider context={form.context}>
+			<fetcher.Form method="POST" id={form.id}>
+				<label className="block">
+					<span className="block">title</span>
+					<input {...getInputProps(fields.title, { type: "text" })} />
+				</label>
+				<InputCount name={fields.title.name} maxLength={100} />
+				<ErrorMessageList>{fields.title.errors}</ErrorMessageList>
+
+				<label className="block">
+					<span className="block">body</span>
+					<textarea {...getTextareaProps(fields.body)} />
+				</label>
+				<InputCount name={fields.body.name} maxLength={140} />
+				<ErrorMessageList>{fields.body.errors}</ErrorMessageList>
+
+				<button type="submit" disabled={fetcher.state === "submitting"}>
+					submit
+				</button>
+			</fetcher.Form>
+		</FormProvider>
+	);
+}
+
+// Avoid re-rendering the entire form when the input value changes
+function InputCount({ name, maxLength }: { name: string; maxLength: number }) {
+	const [meta] = useField<string>(name);
+	const length = meta.value?.length ?? 0;
+	const isOverLimit = length > maxLength;
+	return (
+		<p
+			role={isOverLimit ? "alert" : undefined}
+			className={cx(isOverLimit && "text-red-500")}
+		>
+			{length} / {maxLength}
+		</p>
 	);
 }
