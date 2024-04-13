@@ -133,7 +133,7 @@ export default function LoginForm() {
 					{...getInputProps(fields.password, { type: "password" })}
 				/>
 
-				<label className="flex items-center">
+				<label className="flex items-center justify-center cursor-pointer">
 					<input
 						className="mr-2"
 						{...getInputProps(fields.shouldRemember, { type: "checkbox" })}

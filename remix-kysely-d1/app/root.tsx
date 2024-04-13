@@ -7,7 +7,6 @@ import {
 	Scripts,
 	ScrollRestoration,
 	redirect,
-	useRouteError,
 } from "@remix-run/react";
 import stylesheet from "./app.css?url";
 
