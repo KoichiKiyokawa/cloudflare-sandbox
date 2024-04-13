@@ -1,5 +1,6 @@
 name = "remix-kysely-d1"
 compatibility_date = "2024-03-29"
+logpush = true
 
 # Variable bindings. These are arbitrary, plaintext strings (similar to environment variables)
 # Note: Use secrets to store sensitive data.

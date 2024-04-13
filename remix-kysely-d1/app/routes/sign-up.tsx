@@ -1,20 +1,24 @@
 import { getInputProps, useForm } from "@conform-to/react";
 import { parseWithZod } from "@conform-to/zod";
-import {
-  type ActionFunctionArgs,
-  createCookie,
-  redirect,
-} from "@remix-run/cloudflare";
+import { redirect, type ActionFunctionArgs } from "@remix-run/cloudflare";
 import { Form, useActionData } from "@remix-run/react";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { AuthForm, parseRequest } from "~/features/auth/components/auth-form";
+import { Card } from "~/features/auth/components/card";
+import { ErrorMessageList } from "~/features/auth/components/error-message-list";
 import { Input } from "~/features/auth/components/input";
+import { SubmitButton } from "~/features/auth/components/submit-button";
 
-const signUpSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-});
+const signUpSchema = z
+  .object({
+    email: z.string().email(),
+    password: z.string().min(8),
+    passwordConfirmation: z.string().min(8),
+  })
+  .refine(
+    ({ password, passwordConfirmation }) => password === passwordConfirmation,
+    { message: "Passwords do not match", path: ["passwordConfirmation"] }
+  );
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const submission = parseWithZod(await request.formData(), {
@@ -28,7 +32,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     .where("email", "==", submission.value.email)
     .executeTakeFirst();
 
-  if (emailExists) throw new Response("Internal Server Error", { status: 500 });
+  if (emailExists)
+    return submission.reply({ formErrors: ["Some error happened"] });
 
   const newId = crypto.randomUUID();
   await context.db
@@ -55,23 +60,24 @@ export async function action({ request, context }: ActionFunctionArgs) {
 export default function SignUpForm() {
   const lastResult = useActionData<ReturnType<typeof action>>();
   const [form, fields] = useForm({
-    // Sync the result of last submission
     lastResult,
-
-    // Reuse the validation logic on the client
     onValidate({ formData }) {
       return parseWithZod(formData, { schema: signUpSchema });
     },
-
-    // Validate the form on blur event triggered
     shouldValidate: "onBlur",
   });
 
   return (
-    <div>
-      <h1>Login</h1>
-      <div>{form.errors}</div>
-      <Form method="POST" id={form.id} onSubmit={form.onSubmit}>
+    <Card>
+      <h1 className="text-lg">Sign Up</h1>
+      <ErrorMessageList>{form.errors}</ErrorMessageList>
+
+      <Form
+        method="POST"
+        id={form.id}
+        onSubmit={form.onSubmit}
+        className="space-y-4"
+      >
         <Input
           errors={fields.email.errors}
           label="Email"
@@ -82,9 +88,14 @@ export default function SignUpForm() {
           label="Password"
           {...getInputProps(fields.password, { type: "password" })}
         />
+        <Input
+          errors={fields.passwordConfirmation.errors}
+          label="Password(Confirmation)"
+          {...getInputProps(fields.passwordConfirmation, { type: "password" })}
+        />
 
-        <button type="submit">Submit</button>
+        <SubmitButton>Sign Up</SubmitButton>
       </Form>
-    </div>
+    </Card>
   );
 }

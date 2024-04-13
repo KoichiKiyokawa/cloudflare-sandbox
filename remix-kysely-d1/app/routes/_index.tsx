@@ -6,7 +6,7 @@ import type {
   MetaFunction,
 } from "@remix-run/cloudflare";
 import { useFetcher, useLoaderData } from "@remix-run/react";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { z } from "zod";
 import { FormWithConfirmation } from "~/components/functional/form-with-confirmation";
 import { requireCurrentUserId } from "~/features/auth/service.server";
@@ -112,7 +112,6 @@ export default function Index() {
 }
 
 function PostForm() {
-  const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher<typeof action>();
 
   const [form, fields] = useForm({
@@ -121,11 +120,12 @@ function PostForm() {
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data?.error === undefined)
-      formRef.current?.reset();
-  }, [fetcher.data?.error, fetcher.state]);
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      document.forms[form.id as any].reset();
+  }, [fetcher.data?.error, fetcher.state, form.id]);
 
   return (
-    <fetcher.Form method="POST" ref={formRef} id={form.id}>
+    <fetcher.Form method="POST" id={form.id}>
       <input
         type="text"
         name="name"

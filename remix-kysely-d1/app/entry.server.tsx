@@ -42,3 +42,7 @@ export default async function handleRequest(
     status: responseStatusCode,
   });
 }
+
+export function handleError(error: unknown): void {
+  console.error(error);
+}

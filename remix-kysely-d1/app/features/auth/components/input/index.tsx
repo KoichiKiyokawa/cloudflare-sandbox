@@ -1,3 +1,5 @@
+import { ErrorMessageList } from "../error-message-list";
+
 type Props = {
   label: string;
   errors?: string[];
@@ -6,9 +8,9 @@ type Props = {
 export function Input({ label, errors, ...props }: Props) {
   return (
     <div>
-      <label>{label}</label>
-      <input {...props} />
-      <div>{errors}</div>
+      <label className="block">{label}</label>
+      <input {...props} className="rounded w-full p-2" />
+      <ErrorMessageList>{errors}</ErrorMessageList>
     </div>
   );
 }

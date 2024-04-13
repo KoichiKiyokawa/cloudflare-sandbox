@@ -33,7 +33,7 @@ tasks:
   format:ts:
     cmd: pnpm biome format . --write
   format:sql:
-    cmd: sql-formatter db/schema.sql --fix -c sql-formatterrc.json
+    cmd: pnpm sql-formatter db/schema.sql --fix -c sql-formatterrc.json
 
   # migrate
   migrate:gen:
