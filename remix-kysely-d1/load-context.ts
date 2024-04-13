@@ -29,7 +29,7 @@ export const getLoadContext: GetLoadContextFunction<Env> = ({ context }) => ({
       secrets: [context.cloudflare.env.SESSION_SECRET],
       sameSite: "lax",
       httpOnly: true,
-      secure: import.meta.env.PROD,
+      secure: context.cloudflare.env.APP_ENV === "prod",
     }),
   }),
 });

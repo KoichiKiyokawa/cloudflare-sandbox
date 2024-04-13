@@ -1,9 +1,10 @@
 version: '3'
 tasks:
   build:
-    cmd: remix vite:build
+    cmd: pnpm remix vite:build
   deploy:
-    cmd: npm run build && wrangler pages deploy ./build/client
+    cmd: pnpm wrangler pages deploy ./build/client
+    deps: [build]
   lint:
     cmd: pnpm biome lint .
   start:
@@ -11,8 +12,8 @@ tasks:
   typecheck:
     cmd: tsc
   preview:
-    deps: [build]
     cmd: wrangler pages dev ./build/client
+    deps: [build]
 
   # type generation
   build-cf-types:

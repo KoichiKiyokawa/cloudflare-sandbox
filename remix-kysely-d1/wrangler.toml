@@ -4,8 +4,8 @@ compatibility_date = "2024-03-29"
 # Variable bindings. These are arbitrary, plaintext strings (similar to environment variables)
 # Note: Use secrets to store sensitive data.
 # Docs: https://developers.cloudflare.com/pages/functions/bindings/#environment-variables
-[vars]
-SESSION_SECRET = "dummy-secret"
+# [vars]
+# MY_VARIABLE = "production_value"
 
 # Bind the Workers AI model catalog. Run machine learning models, powered by serverless GPUs, on Cloudflare’s global network
 # Docs: https://developers.cloudflare.com/pages/functions/bindings/#workers-ai
