@@ -59,4 +59,7 @@ tasks:
       node scripts/create-seed.mjs > tmp/seed.sql
       pnpm wrangler d1 execute remix-kysely-d1 --local --file tmp/seed.sql
       rm -rf tmp
+
+  # log
+  log:tail: pnpm wrangler pages deployment tail --project-name remix-kysely-d1
     
