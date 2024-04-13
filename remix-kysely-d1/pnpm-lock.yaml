@@ -5,6 +5,12 @@ settings:
   excludeLinksFromLockfile: false
 
 dependencies:
+  '@conform-to/react':
+    specifier: ^1.1.0
+    version: 1.1.0(react@18.2.0)
+  '@conform-to/zod':
+    specifier: ^1.1.0
+    version: 1.1.0(zod@3.22.4)
   '@remix-run/cloudflare':
     specifier: ^2.8.1
     version: 2.8.1(@cloudflare/workers-types@4.20240329.0)(typescript@5.4.3)
@@ -14,6 +20,9 @@ dependencies:
   '@remix-run/react':
     specifier: ^2.8.1
     version: 2.8.1(react-dom@18.2.0)(react@18.2.0)(typescript@5.4.3)
+  bcryptjs:
+    specifier: 2.4.3
+    version: 2.4.3
   isbot:
     specifier: ^4.1.0
     version: 4.4.0
@@ -55,6 +64,9 @@ devDependencies:
   '@tailwindcss/vite':
     specifier: 4.0.0-alpha.11
     version: 4.0.0-alpha.11(vite@5.2.7)
+  '@types/bcryptjs':
+    specifier: ^2.4.6
+    version: 2.4.6
   '@types/react':
     specifier: ^18.2.20
     version: 18.2.74
@@ -74,8 +86,8 @@ devDependencies:
     specifier: 15.3.0
     version: 15.3.0
   tailwindcss:
-    specifier: 4.0.0-alpha.11
-    version: 4.0.0-alpha.11
+    specifier: 4.0.0-alpha.12
+    version: 4.0.0-alpha.12
   typescript:
     specifier: ^5.1.6
     version: 5.4.3
@@ -580,6 +592,28 @@ packages:
 
   /@cloudflare/workers-types@4.20240329.0:
     resolution: {integrity: sha512-AbzgvSQjG8Nci4xxQEcjTTVjiWXgOQnFIbIHtEZXteHiMGDXMWGegjWBo5JHGsZCq+U5V/SD5EnlypQnUQEoig==}
+
+  /@conform-to/dom@1.1.0:
+    resolution: {integrity: sha512-KtiGwke6qeh8xDMwebbT/EanxhVX40uZtyHr8VH2V8jBHwavy94V673F4YdlhHpXoqRcZcewie/GQ7tIi2mC/A==}
+    dev: false
+
+  /@conform-to/react@1.1.0(react@18.2.0):
+    resolution: {integrity: sha512-zEgesgfllN29SdVZhlm3CGIufQm/gkFia7QMrKX/fH4L+iYgQ7n1LVgu+3Jxr4jXE8wW5YDbemwo1cqhE++xZg==}
+    peerDependencies:
+      react: '>=18'
+    dependencies:
+      '@conform-to/dom': 1.1.0
+      react: 18.2.0
+    dev: false
+
+  /@conform-to/zod@1.1.0(zod@3.22.4):
+    resolution: {integrity: sha512-0ukglFJ1gknFf81j9zB/mZq68fhhSu0s2bxZIkBqPocdGBA6LvHnV7ORyE+27WUNyJ36L2sjksNXVm9SDSUexw==}
+    peerDependencies:
+      zod: ^3.21.0
+    dependencies:
+      '@conform-to/dom': 1.1.0
+      zod: 3.22.4
+    dev: false
 
   /@cspotcode/source-map-support@0.8.1:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -1823,6 +1857,10 @@ packages:
       '@types/estree': 1.0.5
     dev: true
 
+  /@types/bcryptjs@2.4.6:
+    resolution: {integrity: sha512-9xlo6R2qDs5uixm0bcIqCeMCE6HiQsIyel9KQySStiyqNl2tnj2mP3DX1Nf56MD6KMenNNlBBsy3LJ7gUEQPXQ==}
+    dev: true
+
   /@types/cookie@0.6.0:
     resolution: {integrity: sha512-4Kh9a6B2bQciAhf7FSuMRRkUWecJgJu9nPnx3yzpsfXX/c50REIqpHY4C82bXP90qrLtXtkDxTZosYO3UpOwlA==}
 
@@ -2076,6 +2114,10 @@ packages:
   /base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
     dev: true
+
+  /bcryptjs@2.4.3:
+    resolution: {integrity: sha512-V/Hy/X9Vt7f3BbPJEi8BdVFMByHi+jNXrYkW3huaybV/kQ0KJg0Y6PkEMbn+zeT+i+SiKZ/HMqJGIIt4LZDqNQ==}
+    dev: false
 
   /better-sqlite3@9.4.5:
     resolution: {integrity: sha512-uFVyoyZR9BNcjSca+cp3MWCv6upAv+tbMC4SWM51NIMhoQOm4tjIkyxFO/ZsYdGAF61WJBgdzyJcz4OokJi0gQ==}
@@ -5396,6 +5438,10 @@ packages:
 
   /tailwindcss@4.0.0-alpha.11:
     resolution: {integrity: sha512-tcRCkmHk2ACB5bghyizZG4pVA/SCr9BEE/Gbjex4axCRGQNFjbJJ3uXR/2d+ItCAUxSKYgy5LhlJc6mR8dDnrQ==}
+    dev: true
+
+  /tailwindcss@4.0.0-alpha.12:
+    resolution: {integrity: sha512-ogYUtw4cs5z20eKU8S0YxlYeWgnZObl9BmOED0IAvKuECxPaEt9Expdghi7Hsvy+0ibHkeH/6dyZqzQBO/E4Bg==}
     dev: true
 
   /tar-fs@2.1.1:

@@ -16,7 +16,7 @@ tasks:
 
   # type generation
   build-cf-types:
-    cmd: wrangler types
+    cmd: pnpm wrangler types
   db-type:gen:
     desc: Generate db type files
     cmd: |
@@ -46,7 +46,16 @@ tasks:
       pnpm atlas migrate diff --to file://db/schema.sql --dev-url "sqlite://file?mode=memory" $migration_name
   migrate:apply: 
     desc: Apply migrations (local)
-    cmd: wrangler d1 migrations apply remix-kysely-d1 --local
+    cmd: pnpm wrangler d1 migrations apply remix-kysely-d1 --local
   migrate:apply:prd:
     desc: Apply migrations (prd)
-    cmd: wrangler d1 migrations apply remix-kysely-d1 --remote
+    cmd: pnpm wrangler d1 migrations apply remix-kysely-d1 --remote
+
+  seed:
+    desc: Seeds data
+    cmd: |
+      mkdir -p tmp
+      node scripts/create-seed.mjs > tmp/seed.sql
+      pnpm wrangler d1 execute remix-kysely-d1 --local --file tmp/seed.sql
+      rm -rf tmp
+    

@@ -1,3 +1,5 @@
+import { useForm } from "@conform-to/react";
+import { parseWithZod } from "@conform-to/zod";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -7,10 +9,8 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { FormWithConfirmation } from "~/components/functional/form-with-confirmation";
-import {
-  throwBadRequest,
-  throwMethodNotAllowed,
-} from "~/utils/response.server";
+import { requireCurrentUserId } from "~/features/auth/service.server";
+import { throwMethodNotAllowed } from "~/utils/response.server";
 
 export const meta: MetaFunction = () => {
   return [
@@ -22,53 +22,59 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-export async function loader({ context }: LoaderFunctionArgs) {
-  try {
-    const usersPromise = context.db
-      .selectFrom("users")
-      .selectAll()
-      .orderBy("updated_at desc")
-      .execute();
-    return {
-      users: await usersPromise,
-    };
-  } catch (e) {
-    console.error(e);
-    return {
-      users: [],
-    };
-  }
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const currentUserId = await requireCurrentUserId({ request, context });
+
+  const postsPromise = context.db
+    .selectFrom("posts")
+    .selectAll()
+    .orderBy("updated_at desc")
+    .execute();
+
+  return {
+    posts: await postsPromise,
+    currentUserId,
+  };
 }
 
+const postSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+});
+
 export async function action({ request, context }: ActionFunctionArgs) {
+  const currentUserId = await requireCurrentUserId({ request, context });
   const formData = await request.formData();
 
   switch (request.method) {
     case "POST": {
-      const result = z
-        .object({ name: z.string().min(1) })
-        .safeParse(Object.fromEntries(formData));
-      if (!result.success) throwBadRequest();
+      const submission = parseWithZod(formData, { schema: postSchema });
+      if (submission.status !== "success") return submission.reply();
 
       await context.db
-        .insertInto("users")
-        .values({ name: result.data.name, id: crypto.randomUUID() })
+        .insertInto("posts")
+        .values({
+          id: crypto.randomUUID(),
+          title: submission.value.title,
+          body: submission.value.body,
+          user_id: currentUserId,
+        })
         .execute();
 
-      return { ok: true };
+      return submission.reply();
     }
     case "DELETE": {
-      const result = z
-        .object({ id: z.string().uuid() })
-        .safeParse(Object.fromEntries(formData));
-      if (!result.success) throwBadRequest();
+      const submission = parseWithZod(formData, {
+        schema: z.object({ id: z.string().uuid() }),
+      });
+      if (submission.status !== "success") return submission.reply();
 
       await context.db
-        .deleteFrom("users")
-        .where("id", "=", result.data.id)
+        .deleteFrom("posts")
+        .where("id", "=", submission.value.id)
         .execute();
 
-      return { ok: true };
+      return submission.reply();
     }
     default:
       throwMethodNotAllowed();
@@ -76,45 +82,58 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export default function Index() {
-  const formRef = useRef<HTMLFormElement>(null);
-  const { users } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof action>();
-
-  useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data?.ok) {
-      formRef.current?.reset();
-    }
-  }, [fetcher.data?.ok, fetcher.state]);
+  const { posts, currentUserId } = useLoaderData<typeof loader>();
 
   return (
     <div className="container">
-      <fetcher.Form method="POST" ref={formRef}>
-        <input
-          type="text"
-          name="name"
-          disabled={fetcher.state === "submitting"}
-        />
-        <button type="submit" disabled={fetcher.state === "submitting"}>
-          submit
-        </button>
-      </fetcher.Form>
+      <PostForm />
 
       <div className="space-y-4">
-        {users.map((user) => (
-          <div key={user.id} className="border">
-            <pre>{JSON.stringify(user, null, 2)}</pre>
-            <FormWithConfirmation method="DELETE">
-              <input type="hidden" name="id" value={user.id ?? undefined} />
-              <button
-                type="submit"
-                className="bg-red-500 px-2 text-white rounded"
-              >
-                delete
-              </button>
-            </FormWithConfirmation>
+        {posts.map((post) => (
+          <div key={post.id} className="border">
+            <pre>{JSON.stringify(post, null, 2)}</pre>
+            {post.user_id === currentUserId && (
+              <FormWithConfirmation method="DELETE">
+                <button
+                  name="id"
+                  value={post.id}
+                  type="submit"
+                  className="bg-red-500 px-2 text-white rounded"
+                >
+                  delete
+                </button>
+              </FormWithConfirmation>
+            )}
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+function PostForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+  const fetcher = useFetcher<typeof action>();
+
+  const [form, fields] = useForm({
+    lastResult: fetcher.data,
+  });
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.error === undefined)
+      formRef.current?.reset();
+  }, [fetcher.data?.error, fetcher.state]);
+
+  return (
+    <fetcher.Form method="POST" ref={formRef} id={form.id}>
+      <input
+        type="text"
+        name="name"
+        disabled={fetcher.state === "submitting"}
+      />
+      <button type="submit" disabled={fetcher.state === "submitting"}>
+        submit
+      </button>
+    </fetcher.Form>
   );
 }
