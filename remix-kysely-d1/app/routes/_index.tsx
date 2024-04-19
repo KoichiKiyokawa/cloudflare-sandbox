@@ -12,13 +12,12 @@ import type {
 	MetaFunction,
 } from "@remix-run/cloudflare";
 import { useFetcher, useLoaderData } from "@remix-run/react";
-import { useEffect } from "react";
+import cx from "clsx/lite";
 import { z } from "zod";
 import { FormWithConfirmation } from "~/components/functional/form-with-confirmation";
+import { ErrorMessageList } from "~/features/auth/components/error-message-list";
 import { requireCurrentUserId } from "~/features/auth/service.server";
 import { throwMethodNotAllowed } from "~/utils/response.server";
-import cx from "clsx/lite";
-import { ErrorMessageList } from "~/features/auth/components/error-message-list";
 
 export const meta: MetaFunction = () => {
 	return [
