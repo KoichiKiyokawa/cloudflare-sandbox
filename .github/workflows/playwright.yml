@@ -1,12 +1,12 @@
 name: Playwright Tests
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
     paths:
       - remix-kysely-d1/**
       - .github/**
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
     paths:
       - remix-kysely-d1/**
       - .github/**
@@ -20,11 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: ./actions/setup
       with:
-        node-version: lts/*
-    - name: Install dependencies
-      run: corepack enable pnpm && pnpm install --frozen-lockfile
+        dir: remix-kysely-d1
     - name: Install Playwright Browsers
       run: pnpm exec playwright install --with-deps
     - name: Run Playwright tests
