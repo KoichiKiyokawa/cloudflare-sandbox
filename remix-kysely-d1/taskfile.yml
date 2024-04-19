@@ -15,6 +15,10 @@ tasks:
     cmd: wrangler pages dev ./build/client
     deps: [build]
 
+  # test
+  test:e2e:
+    cmd: pnpm playwright test
+
   # type generation
   build-cf-types:
     cmd: pnpm wrangler types
