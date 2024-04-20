@@ -17,9 +17,13 @@ tasks:
 
   # test
   test:e2e:
-    cmd: pnpm playwright test
+    cmd: pnpm playwright test {{.CLI_ARGS}}
+  test:e2e:ui:
+    cmd: pnpm task test:component -- --ui
   test:component:
-    cmd: pnpm playwright test -c playwright-ct.config.ts --ui
+    cmd: pnpm playwright test -c playwright-ct.config.ts {{.CLI_ARGS}}
+  test:component:ui:
+    cmd: pnpm task test:component -- --ui
 
   # type generation
   build-cf-types:
