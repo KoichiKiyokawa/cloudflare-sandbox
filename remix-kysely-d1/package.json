@@ -29,6 +29,7 @@
     "@biomejs/biome": "1.6.4",
     "@cloudflare/workers-types": "4.20240405.0",
     "@go-task/cli": "3.36.0",
+    "@playwright/experimental-ct-react": "^1.43.1",
     "@playwright/test": "^1.43.1",
     "@remix-run/dev": "2.8.1",
     "@tailwindcss/vite": "4.0.0-alpha.11",
