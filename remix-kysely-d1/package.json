@@ -37,7 +37,7 @@
     "@types/node": "^20.12.7",
     "@types/react": "18.2.77",
     "@types/react-dom": "18.2.25",
-    "better-sqlite3": "9.5.0",
+    "better-sqlite3": "11.5.0",
     "kysely-codegen": "0.14.2",
     "node-fetch": "3.3.2",
     "sql-formatter": "15.3.0",
