@@ -88,11 +88,11 @@ importers:
         specifier: 18.2.25
         version: 18.2.25
       better-sqlite3:
-        specifier: 9.5.0
-        version: 9.5.0
+        specifier: 11.5.0
+        version: 11.5.0
       kysely-codegen:
         specifier: 0.14.2
-        version: 0.14.2(better-sqlite3@9.5.0)(kysely@0.27.3)
+        version: 0.14.2(better-sqlite3@11.5.0)(kysely@0.27.3)
       node-fetch:
         specifier: 3.3.2
         version: 3.3.2
@@ -1302,8 +1302,8 @@ packages:
   bcryptjs@2.4.3:
     resolution: {integrity: sha512-V/Hy/X9Vt7f3BbPJEi8BdVFMByHi+jNXrYkW3huaybV/kQ0KJg0Y6PkEMbn+zeT+i+SiKZ/HMqJGIIt4LZDqNQ==}
 
-  better-sqlite3@9.5.0:
-    resolution: {integrity: sha512-01qVcM4gPNwE+PX7ARNiHINwzVuD6nx0gdldaAAcu+MrzyIAukQ31ZDKEpzRO/CNA9sHpxoTZ8rdjoyAin4dyg==}
+  better-sqlite3@11.5.0:
+    resolution: {integrity: sha512-e/6eggfOutzoK0JWiU36jsisdWoHOfN9iWiW/SieKvb7SAa6aGNmBM/UKyp+/wWSXpLlWNN8tCPwoDNPhzUvuQ==}
 
   binary-extensions@2.3.0:
     resolution: {integrity: sha512-Ceh+7ox5qe7LJuLHoY0feh3pHuUDHAcRUeyL2VYghZwfpkNIy/+8Ocg0a3UuSoYzavmylwuLWQOf3hl0jjMMIw==}
@@ -1846,10 +1846,12 @@ packages:
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
+    deprecated: Glob versions prior to v9 are no longer supported
 
   glob@8.1.0:
     resolution: {integrity: sha512-r8hpEjiQEYlF2QU0df3dS+nxxSIreXQS1qRhMJM0Q5NDdR386C7jb7Hwwod8Fgiuex+k0GFjgft18yvxm5XoCQ==}
     engines: {node: '>=12'}
+    deprecated: Glob versions prior to v9 are no longer supported
 
   globals@11.12.0:
     resolution: {integrity: sha512-WOBp/EEGUiIsJSp7wcv/y6MO+lV9UoncWqxuFfm8eBwzWNgyfBd6Gz+IeKQ9jCmyhoH99g15M3T+QaVHFjizVA==}
@@ -1936,6 +1938,7 @@ packages:
 
   inflight@1.0.6:
     resolution: {integrity: sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==}
+    deprecated: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
 
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
@@ -4525,7 +4528,7 @@ snapshots:
 
   bcryptjs@2.4.3: {}
 
-  better-sqlite3@9.5.0:
+  better-sqlite3@11.5.0:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.2
@@ -5362,7 +5365,7 @@ snapshots:
 
   kleur@4.1.5: {}
 
-  kysely-codegen@0.14.2(better-sqlite3@9.5.0)(kysely@0.27.3):
+  kysely-codegen@0.14.2(better-sqlite3@11.5.0)(kysely@0.27.3):
     dependencies:
       chalk: 4.1.2
       dotenv: 16.4.5
@@ -5372,7 +5375,7 @@ snapshots:
       micromatch: 4.0.5
       minimist: 1.2.8
     optionalDependencies:
-      better-sqlite3: 9.5.0
+      better-sqlite3: 11.5.0
 
   kysely-d1@0.3.0(kysely@0.27.3):
     dependencies:
