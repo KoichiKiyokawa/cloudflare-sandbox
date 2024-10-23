@@ -11,7 +11,7 @@
   "dependencies": {
     "@cloudflare/next-on-pages": "1.6.3",
     "@cloudflare/workers-types": "^4.20230922.0",
-    "@types/node": "20.8.0",
+    "@types/node": "22.7.9",
     "@types/react": "18.2.23",
     "@types/react-dom": "18.2.8",
     "autoprefixer": "10.4.16",
