@@ -43,7 +43,7 @@
     "sql-formatter": "15.3.0",
     "tailwindcss": "4.0.0-alpha.12",
     "typescript": "5.4.5",
-    "vite": "5.2.8",
+    "vite": "6.2.3",
     "vite-tsconfig-paths": "4.3.2",
     "wrangler": "3.50.0"
   },
