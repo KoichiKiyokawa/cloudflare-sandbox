@@ -29,7 +29,7 @@ jobs:
       run: pnpm task test:component
     - name: Run Playwright tests
       run: pnpm task test:e2e
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       if: always()
       with:
         name: playwright-report
