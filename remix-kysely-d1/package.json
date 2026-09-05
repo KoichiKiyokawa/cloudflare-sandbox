@@ -27,7 +27,7 @@
   "devDependencies": {
     "@ariga/atlas": "0.21.1",
     "@biomejs/biome": "1.6.4",
-    "@cloudflare/workers-types": "4.20240405.0",
+    "@cloudflare/workers-types": "5.20260829.1",
     "@go-task/cli": "3.36.0",
     "@playwright/experimental-ct-react": "^1.43.1",
     "@playwright/test": "^1.43.1",
