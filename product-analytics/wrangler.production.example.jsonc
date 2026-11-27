@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "product-analytics",
+  "main": "collector/worker.ts",
+  "compatibility_date": "2026-11-27",
+  "observability": {
+    "logs": { "enabled": true, "invocation_logs": false }
+  },
+  "pipelines": [
+    { "binding": "EVENTS", "stream": "REPLACE_WITH_BASIN_STREAM_ID" }
+  ]
+}

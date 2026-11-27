@@ -1,0 +1,40 @@
+{
+  "name": "product-analytics",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "types": "wrangler types worker-configuration.d.ts --strict-vars=false --include-runtime=false --env-file .dev.vars.example",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts",
+    "test:e2e": "node tests/e2e.ts",
+    "dev:collector": "wrangler dev --port 8787",
+    "analytics": "node analysis/cli.ts",
+    "dashboard": "vite --host 127.0.0.1",
+    "build:dashboard": "vite build",
+    "cost": "node docs/cost.ts",
+    "demo:prepare": "node examples/dashboard-sample.ts"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "4.1.6",
+    "@duckdb/node-api": "2.0.1-r.1",
+    "@snowplow/browser-tracker": "4.10.3",
+    "@snowplow/node-tracker": "4.10.3",
+    "@solidjs/web": "2.0.4",
+    "echarts": "6.1.0",
+    "solid-js": "2.0.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261127.1",
+    "@solidjs/vite-plugin": "3.0.1",
+    "@types/node": "24.13.2",
+    "miniflare": "5.20261123.1-beta",
+    "playwright-core": "1.65.1",
+    "typescript": "6.0.3",
+    "vite": "8.4.0",
+    "wrangler": "4.168.0"
+  },
+  "packageManager": "pnpm@12.22.0"
+}

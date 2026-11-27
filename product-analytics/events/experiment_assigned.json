@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iglu:com.product_analytics/experiment_assigned/jsonschema/1-0-0",
+  "type": "object",
+  "required": ["experiment_id", "variant"],
+  "properties": {
+    "experiment_id": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "variant": { "type": "string", "minLength": 1, "maxLength": 100 }
+  },
+  "additionalProperties": false
+}

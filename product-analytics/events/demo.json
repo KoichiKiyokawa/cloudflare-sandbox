@@ -1,0 +1,21 @@
+[
+  {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "iglu:com.example.demo/pricing_opened/jsonschema/1-0-0",
+    "type": "object",
+    "required": ["plan"],
+    "properties": { "plan": { "enum": ["free", "plus"] } },
+    "additionalProperties": false
+  },
+  {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "iglu:com.example.demo/purchase_completed/jsonschema/1-0-0",
+    "type": "object",
+    "required": ["plan", "amount"],
+    "properties": {
+      "plan": { "enum": ["free", "plus"] },
+      "amount": { "type": "number", "minimum": 0 }
+    },
+    "additionalProperties": false
+  }
+]
