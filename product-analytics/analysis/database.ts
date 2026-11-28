@@ -3,6 +3,8 @@ import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { serverOnlyEventNames } from '../events/projects.ts';
+import { eventColumns } from '../storage/layout.ts';
+import { isStorageRoot, storagePaths } from './storage-paths.ts';
 
 export type ReportName = 'active' | 'funnel' | 'retention' | 'history' | 'sessions' | 'acquisition' | 'segment' | 'experiment';
 export interface ReportOptions {
@@ -21,12 +23,8 @@ export interface ReportOptions {
   conversion?: string;
 }
 
-const columns = {
-  app_id: 'VARCHAR', event_id: 'VARCHAR', occurred_at: 'VARCHAR',
-  received_at: 'VARCHAR', source: 'VARCHAR', payload_json: 'VARCHAR',
-};
-const columnNames = Object.keys(columns).join(', ');
-const jsonColumns = '{' + Object.entries(columns).map(([name, type]) => `${name}: '${type}'`).join(', ') + '}';
+const columnNames = eventColumns.join(', ');
+const jsonColumns = '{' + eventColumns.map((name) => `${name}: 'VARCHAR'`).join(', ') + '}';
 const sqlFile = (name: string) => readFile(new URL(`./sql/${name}.sql`, import.meta.url), 'utf8');
 const literal = (value: string) => "'" + value.replaceAll("'", "''") + "'";
 const pathList = (paths: string[]) => '[' + paths.map(literal).join(', ') + ']';
@@ -39,15 +37,16 @@ export function rollingReportDates(observedUntil: string, days: number, timeZone
   return { from, to };
 }
 
-async function openStorage(paths: string[], signal?: AbortSignal) {
+async function openStorage(paths: string[], signal?: AbortSignal, app?: string) {
   signal?.throwIfAborted();
   if (!paths.length) throw new Error('Specify a Parquet or NDJSON path');
   const remote = paths.some((path) => path.startsWith('r2://'));
   const other = paths.find((path) => /^[a-z]+:\/\//i.test(path) && !path.startsWith('r2://'));
   if (other) throw new Error('Use a local path or r2://');
-  const parquet = paths.filter((path) => path.toLowerCase().endsWith('.parquet'));
-  const ndjson = paths.filter((path) => /\.ndjson(?:\.gz)?$/i.test(path));
-  if (parquet.length + ndjson.length !== paths.length) throw new Error('Sources must end in .parquet, .ndjson or .ndjson.gz');
+  const root = app !== undefined && paths.length === 1 && isStorageRoot(paths[0]) ? paths[0] : undefined;
+  if (!root && !paths.every((path) => /\.(?:parquet|ndjson(?:\.gz)?)$/i.test(path))) {
+    throw new Error('Specify event files or a single managed storage root');
+  }
 
   const runtime: Record<string, string> = {};
   const { ANALYTICS_DUCKDB_THREADS, ANALYTICS_DUCKDB_MEMORY, ANALYTICS_DUCKDB_TEMP, ANALYTICS_DUCKDB_TEMP_LIMIT } = process.env;
@@ -78,9 +77,13 @@ async function openStorage(paths: string[], signal?: AbortSignal) {
         throw new Error('Could not configure the DuckDB R2 secret');
       }
     }
+    const selected = root && app !== undefined ? await storagePaths(connection, root, app, signal) : paths;
+    const parquet = selected.filter((path) => path.toLowerCase().endsWith('.parquet'));
+    const ndjson = selected.filter((path) => /\.ndjson(?:\.gz)?$/i.test(path));
     const sources = [];
     if (parquet.length) sources.push(`SELECT ${columnNames} FROM read_parquet(${pathList(parquet)}, union_by_name=true, hive_partitioning=false)`);
     if (ndjson.length) sources.push(`SELECT ${columnNames} FROM read_ndjson(${pathList(ndjson)}, columns=${jsonColumns})`);
+    if (!sources.length) sources.push(`SELECT ${eventColumns.map((name) => `NULL::VARCHAR AS ${name}`).join(', ')} WHERE false`);
     signal?.throwIfAborted();
     await connection.run(`CREATE TEMP VIEW stored_events AS ${sources.join(' UNION ALL ')}`);
     const connected = connection;
@@ -102,7 +105,7 @@ async function openStorage(paths: string[], signal?: AbortSignal) {
 }
 
 export async function openAnalysis(paths: string[], options: ReportOptions, signal?: AbortSignal) {
-  const db = await openStorage(paths, signal);
+  const db = await openStorage(paths, signal, options.app);
   try {
     signal?.throwIfAborted();
     await db.connection.run(`CREATE TEMP TABLE report_params AS SELECT

@@ -14,21 +14,13 @@ pnpm exec wrangler deploy
 
 `SERVER_TOKENS` はアプリ ID をキーとする JSON オブジェクトです。アプリごとに異なる24文字以上の乱数を使い、同じ値をバックエンドに設定します。デプロイ先の収集 Worker URL を Snowplow トラッカーの `collectorOrigin` に設定します。フロントとバックエンドから各1バッチを送り、HTTP 204 と R2 への保存を確認します。
 
-R2 の読み取り鍵を設定した AWS CLI で、分析対象のデータを差分同期できます。ローカルへの同期後、受信日ごとに `pack` すると、繰り返しの集計で多数の小ファイルを開く時間を減らせます。
+## Parquet への自動変換を確認する
 
-```sh
-AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
-aws --region auto --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  s3 sync s3://product-analytics-raw/raw/v1/ local-data/raw
+収集 Worker の Cron Trigger が、R2 の gzip NDJSON を UTC 受信日とアプリごとにまとめ、同じバケットの `parquet/v1/` に書きます。通常の運用で端末への同期は不要です。Parquet は元のイベントを全列保持します。
 
-pnpm exec node --input-type=module <<'JS'
-import { pack } from './analysis/database.ts';
+設定例は UTC の毎正時に実行します。Cloudflare Workers Paid では1時間以上の間隔にすると Cron に適用される CPU の上限が長くなります。Free の Cron の CPU 枠は10 msなので、業務運用では Paid で実測してください。変換前のイベントもその場で読めるため、この実行間隔はダッシュボードのキャッシュ期限と独立しています。当日の原本は直接読み続け、UTC の日付が変わってからまとめます。これにより、受信量の少ない時間帯ごとに小さな Parquet が増えるのを抑えます。1回に前日と過去分の巡回を各1ページ進めます。1ページは最大1,000オブジェクトです。受信量がこの処理量を超える環境や既存データが多い環境では、巡回時間と未変換分の読み取り負荷を計測してください。
 
-await pack(['local-data/raw/2026-11-27/*/*.ndjson.gz'], 'local-data/parquet/2026-11-27.parquet');
-JS
-```
-
-`pack` では元の受信日と同じ出力ファイルを使うと、受信日の途中で実行しても後から全件を再作成できます。同じ受信日をまとめるときは、その受信日の全アプリを入力に含めてください。空の受信日はスキップしてください。ローカルファイルにもバケットと同じデータ保持方針を適用してください。
+デプロイ後にイベントを送り、Cron の実行結果と `parquet_compaction` ログを見ます。変換結果とその対象を記録する `manifest.json` が R2 に保存されます。変換途中の原本は DuckDB がそのまま参照し、次の Cron が処理を再開します。プレビューでは [Wrangler の手順](https://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers) に沿ってスケジュールを実行できます。
 
 ## データ保持
 
@@ -40,11 +32,13 @@ pnpm exec wrangler r2 bucket lifecycle add product-analytics-raw expire-events r
 
 [R2 オブジェクトのライフサイクル](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)。
 
+Parquet と対応表は後から作られるため、原本だけにライフサイクルを設定してもイベントの保存期限は揃いません。原本の受信日を基準に削除する場合は、期限を過ぎた受信日の `raw/v1/` と `parquet/v1/` の両方が対象です。対応表が参照する Parquet に、単独で先に失効するルールを設定しないでください。
+
 ## DuckDB から R2 を読む
 
 R2 バケットを限定した読み取り専用の S3 API キーを発行し、`R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` を環境変数として渡します。DuckDB は初回に `httpfs` 拡張を取得するため、拡張配信元に接続できる環境が必要です。クエリの試行回数が多い場合はローカルの Parquet を使うと、R2 の読み取りを抑えられます。
 
-クエリサーバーの `ANALYTICS_SOURCE` や端末から分析する際の `openAnalysis()` に、`r2://product-analytics-raw/raw/v1/**/*.ndjson.gz` のようなグロブを指定します。Parquet も指定できます。`openAnalysis()` に複数のパスを渡すと、パスごとの形式を一緒に扱えます。各グロブには最低1ファイルが必要です。R2 の一覧と読み取りができる資格情報を使います。端末から SQL を実行する例は [指標の定義](metrics.md#実行例) を参照してください。
+クエリサーバーの `ANALYTICS_SOURCE` や `openAnalysis()` の入力には、バケットのルート `r2://product-analytics-raw` を指定します。DuckDB は対応表を読み、確定済みの Parquet と、どの Parquet にも含まれていない原本を選びます。Parquet の設定を調査するときは `r2://product-analytics-raw/raw/v1/**/*.ndjson.gz` で原本だけを参照できます。端末から SQL を実行する例は [指標の定義](metrics.md#実行例) を参照してください。
 
 [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/)、[DuckDB の R2 対応](https://duckdb.org/docs/stable/core_extensions/httpfs/s3api.html)。
 
@@ -55,7 +49,7 @@ R2 バケットを限定した読み取り専用の S3 API キーを発行し、
 | 環境変数 | 値 |
 | --- | --- |
 | `ANALYTICS_APP` | 集計対象のプロジェクト ID。例は `demo` です。 |
-| `ANALYTICS_SOURCE` | 集計元の Parquet または gzip NDJSON。R2 グロブも指定できます。 |
+| `ANALYTICS_SOURCE` | 本番は R2 バケットのルート `r2://product-analytics-raw`。ローカルの Parquet、gzip NDJSON、R2 グロブを直接指定することもできます。 |
 | `ANALYTICS_QUERY_TOKEN` | Worker と共有する32文字以上の乱数。 |
 | `R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` | R2 を読む場合の読み取り専用認証情報。 |
 | `ANALYTICS_TIME_ZONE` | 暦日集計のタイムゾーン。既定は `Asia/Tokyo` です。 |

@@ -3,6 +3,7 @@
   "name": "product-analytics",
   "main": "collector/worker.ts",
   "compatibility_date": "2026-11-27",
+  "triggers": { "crons": ["0 * * * *"] },
   "ratelimits": [
     { "name": "BROWSER_RATE_LIMIT", "namespace_id": "217110", "simple": { "limit": 600, "period": 60 } }
   ],

@@ -1,6 +1,8 @@
 import type { Crypto as WorkerCrypto } from '@cloudflare/workers-types/index.ts';
 import { projects } from '../events/projects.ts';
 import { decodeBatch } from './protocol.ts';
+import { compactRawPage } from '../storage/compact.ts';
+import { rawPrefix } from '../storage/layout.ts';
 
 type CollectorEnv = Pick<Cloudflare.Env, 'SERVER_TOKENS'> & {
   BROWSER_RATE_LIMIT?: RateLimit;
@@ -59,6 +61,15 @@ function getServerToken(tokens: string | undefined, appId: string): unknown {
 }
 
 export default {
+  async scheduled(event, env) {
+    const utcDate = (time: number) => new Date(time).toISOString().slice(0, 10);
+    const today = rawPrefix + utcDate(event.scheduledTime) + '/';
+    const yesterday = rawPrefix + utcDate(event.scheduledTime - 86_400_000) + '/';
+    for (const [scan, prefix] of [['yesterday', yesterday], ['history', rawPrefix]]) {
+      const progress = await compactRawPage(env.RAW_EVENTS, prefix, scan, today);
+      console.info({ event: 'parquet_compaction', scan, ...progress });
+    }
+  },
   async fetch(request, env): Promise<Response> {
     const route = /^\/v1\/(browser|server)\/([a-z][a-z0-9-]{0,62})$/.exec(new URL(request.url).pathname);
     const source = route?.[1];
@@ -102,7 +113,7 @@ export default {
     }
 
     try {
-      const key = `raw/v1/${receivedAt.slice(0, 10)}/${appId}/${crypto.randomUUID()}.ndjson.gz`;
+      const key = `${rawPrefix}${receivedAt.slice(0, 10)}/${appId}/${crypto.randomUUID()}.ndjson.gz`;
       const lines = events.map((event) => JSON.stringify(event)).join('\n') + '\n';
       const compressed = new Blob([lines]).stream().pipeThrough(new CompressionStream('gzip'));
       const bytes = await new Response(compressed).arrayBuffer();

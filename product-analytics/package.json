@@ -24,6 +24,7 @@
     "@snowplow/node-tracker": "4.10.3",
     "@solidjs/web": "2.0.4",
     "echarts": "6.1.0",
+    "hyparquet-writer": "0.18.1",
     "jose": "6.2.18",
     "solid-js": "2.0.4"
   },

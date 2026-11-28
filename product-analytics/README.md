@@ -5,7 +5,7 @@ Cloudflare Worker が Snowplow トラッカーのイベントを受け、R2 に�
 | 役割 | 実装 |
 | --- | --- |
 | プロダクトのフロント | `examples/browser.ts` と Solid v2 の収集デモ。ページ、SPA 遷移、カスタムイベント、実験を送信します。 |
-| 収集と集計 | `collector/` の Worker、R2 直接保存、`analysis/` の DuckDB と SQL。 |
+| 収集と集計 | `collector/` の Worker が原本を R2 に保存し、`storage/` の処理が Parquet にまとめます。`analysis/` の DuckDB と SQL が変換済みデータと未変換の原本を読みます。 |
 | ダッシュボード | `dashboard/` の Solid v2 アプリ。Apache ECharts で DAU・PV の日次推移と、流入元別セッションの日別件数・構成比を表示します。期間は直近7日・14日・30日・半年（180日）から選べ、日別 CSV をダウンロードできます。DAU と PV にはそれぞれ目標ラインを設定できます。Cloudflare Access で認証し、サーバー側の DuckDB が必要に応じて SQL を実行します。サーバーは結果を1時間キャッシュします。 |
 
 ## ローカルで開発する

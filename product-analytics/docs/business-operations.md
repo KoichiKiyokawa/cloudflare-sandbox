@@ -40,6 +40,8 @@
 
 検証用のダッシュボードにログインし、ブラウザーの開発者ツールの Network で `/api/dashboard/180` の所要時間を記録します。クエリサーバー起動後の初回と、同じ期間を再取得してキャッシュを使った場合の両方を測ります。初回はクエリサーバーの `dashboard_query` ログにある `duration_ms` で DuckDB の初期化、R2 読み込み、集計を合わせた時間を確認します。プロセスの最大常駐メモリは実行環境の監視で、R2 の操作数は R2 Metrics で確認します。
 
+原本だけのグロブと、Parquet を利用するバケットのルートをそれぞれ `ANALYTICS_SOURCE` に設定し、同じ期間の初回クエリを比較します。Parquet を読む場合にも原本キーの一覧取得があるので、LIST と GET を別々に計測します。Cron の CPU 時間と `parquet_compaction` ログの `scanned`、`written` を記録し、受信量に対して変換が追いつくことを確認します。
+
 [Cloudflare R2 のメトリクス](https://developers.cloudflare.com/r2/platform/metrics-analytics/)
 
 ## 4. 更新停止と欠損を見つける
