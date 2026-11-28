@@ -37,3 +37,16 @@ test('rejects mismatched projects, unknown schemas, malformed event IDs and inva
       'demo', 'browser', '2026-11-27T01:00:00.000Z'));
   }
 });
+
+test('accepts purchases from an authenticated server source only', () => {
+  const purchase = {
+    ...packet, e: 'ue', uid: 'sample-account',
+    ue_pr: JSON.stringify({
+      schema: 'iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0',
+      data: { schema: 'iglu:com.example.demo/purchase_completed/jsonschema/1-0-0', data: { plan: 'plus', amount: 10 } },
+    }),
+  };
+  const body = { schema: snowplowPayloadSchema, data: [purchase] };
+  assert.throws(() => decodeBatch(body, 'demo', 'browser', '2026-11-27T01:00:00.000Z'), /requires the server endpoint/);
+  assert.equal(decodeBatch(body, 'demo', 'server', '2026-11-27T01:00:00.000Z')[0].source, 'server');
+});

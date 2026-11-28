@@ -2,6 +2,7 @@ import { DuckDBInstance, type DuckDBConnection } from '@duckdb/node-api';
 import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
+import { serverOnlyEventNames } from '../events/projects.ts';
 
 export const reports = ['active', 'funnel', 'retention', 'history', 'sessions', 'acquisition', 'segment', 'experiment'] as const;
 export type ReportName = typeof reports[number];
@@ -31,7 +32,15 @@ const sqlFile = (name: string) => readFile(new URL(`./sql/${name}.sql`, import.m
 const literal = (value: string) => "'" + value.replaceAll("'", "''") + "'";
 const pathList = (paths: string[]) => '[' + paths.map(literal).join(', ') + ']';
 
-async function openStorage(paths: string[]) {
+export function rollingReportDates(observedUntil: string, days: number, calendar: Intl.DateTimeFormat) {
+  const parts = new Map(calendar.formatToParts(new Date(observedUntil)).map((part) => [part.type, part.value]));
+  const to = `${parts.get('year')}-${parts.get('month')}-${parts.get('day')}`;
+  const from = new Date(Date.parse(to) - days * 86_400_000).toISOString().slice(0, 10);
+  return { from, to };
+}
+
+async function openStorage(paths: string[], profile = false, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (!paths.length) throw new Error('Specify --source with a Parquet or NDJSON path');
   const remote = paths.some((path) => path.startsWith('r2://'));
   const other = paths.find((path) => /^[a-z]+:\/\//i.test(path) && !path.startsWith('r2://'));
@@ -40,10 +49,19 @@ async function openStorage(paths: string[]) {
   const ndjson = paths.filter((path) => /\.ndjson(?:\.gz)?$/i.test(path));
   if (parquet.length + ndjson.length !== paths.length) throw new Error('Sources must end in .parquet, .ndjson or .ndjson.gz');
 
-  const instance = await DuckDBInstance.create(':memory:');
+  const runtime: Record<string, string> = {};
+  const { ANALYTICS_DUCKDB_THREADS, ANALYTICS_DUCKDB_MEMORY, ANALYTICS_DUCKDB_TEMP, ANALYTICS_DUCKDB_TEMP_LIMIT } = process.env;
+  if (ANALYTICS_DUCKDB_THREADS) runtime.threads = ANALYTICS_DUCKDB_THREADS;
+  if (ANALYTICS_DUCKDB_MEMORY) runtime.memory_limit = ANALYTICS_DUCKDB_MEMORY;
+  if (ANALYTICS_DUCKDB_TEMP) runtime.temp_directory = ANALYTICS_DUCKDB_TEMP;
+  if (ANALYTICS_DUCKDB_TEMP_LIMIT) runtime.max_temp_directory_size = ANALYTICS_DUCKDB_TEMP_LIMIT;
+  const instance = await DuckDBInstance.create(':memory:', runtime);
   let connection: DuckDBConnection | undefined;
+  const interrupt = () => connection?.interrupt();
   try {
     connection = await instance.connect();
+    signal?.addEventListener('abort', interrupt, { once: true });
+    signal?.throwIfAborted();
     await connection.run("SET TimeZone = 'UTC'");
     if (remote) {
       const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = process.env;
@@ -59,39 +77,52 @@ async function openStorage(paths: string[]) {
       } catch {
         throw new Error('Could not configure the DuckDB R2 secret');
       }
+      if (profile) await connection.run(`SET redact_http_logs = true; CALL enable_logging('HTTP', storage = 'memory');`);
     }
     const sources = [];
     if (parquet.length) sources.push(`SELECT ${columnNames} FROM read_parquet(${pathList(parquet)}, union_by_name=true, hive_partitioning=false)`);
     if (ndjson.length) sources.push(`SELECT ${columnNames} FROM read_ndjson(${pathList(ndjson)}, columns=${jsonColumns})`);
+    signal?.throwIfAborted();
     await connection.run(`CREATE TEMP VIEW stored_events AS ${sources.join(' UNION ALL ')}`);
     const connected = connection;
     return {
       connection: connected,
+      signal,
       close() {
+        signal?.removeEventListener('abort', interrupt);
         connected.closeSync();
         instance.closeSync();
       },
     };
   } catch (error) {
+    signal?.removeEventListener('abort', interrupt);
     connection?.closeSync();
     instance.closeSync();
     throw error;
   }
 }
 
-export async function openAnalysis(paths: string[], options: ReportOptions) {
-  const db = await openStorage(paths);
+export async function openAnalysis(paths: string[], options: ReportOptions, profile = false, signal?: AbortSignal) {
+  const db = await openStorage(paths, profile, signal);
   try {
+    signal?.throwIfAborted();
     await db.connection.run(`CREATE TEMP TABLE report_params AS SELECT
       ?::VARCHAR AS app_id, ?::DATE AS start_date, ?::DATE AS end_date,
       ?::VARCHAR AS time_zone, ?::TIMESTAMPTZ AS observed_until, ?::TIMESTAMPTZ AS known_at,
       ?::JSON::VARCHAR[] AS steps, ?::DOUBLE AS window_seconds, ?::VARCHAR AS user_filter,
-      ?::VARCHAR AS event_filter, ?::VARCHAR AS property_path, ?::VARCHAR AS experiment, ?::VARCHAR AS conversion`, [
+      ?::VARCHAR AS event_filter, ?::VARCHAR AS property_path, ?::VARCHAR AS experiment, ?::VARCHAR AS conversion,
+      ?::JSON::VARCHAR[] AS server_only_events`, [
       options.app, options.from, options.to, options.timeZone, options.observedUntil, options.knownAt,
       JSON.stringify(options.steps ?? []), options.windowSeconds ?? 86400, options.user ?? null,
       options.event ?? null, options.propertyPath ?? '$', options.experiment ?? null, options.conversion ?? null,
+      JSON.stringify(serverOnlyEventNames(options.app)),
     ]);
-    await db.connection.run(await sqlFile('base'));
+    const snowplow = await sqlFile('snowplow');
+    signal?.throwIfAborted();
+    await db.connection.run(snowplow);
+    const base = await sqlFile('base');
+    signal?.throwIfAborted();
+    await db.connection.run(base);
     return db;
   } catch (error) {
     db.close();
@@ -102,6 +133,7 @@ export async function openAnalysis(paths: string[], options: ReportOptions) {
 type AnalysisDatabase = Awaited<ReturnType<typeof openAnalysis>>;
 
 export async function query(db: AnalysisDatabase, sql: string, values?: string[]) {
+  db.signal?.throwIfAborted();
   const result = await db.connection.runAndReadAll(sql, values);
   try {
     return result.getRowObjectsJson();
@@ -114,23 +146,46 @@ export async function report(db: AnalysisDatabase, name: ReportName) {
   return query(db, await sqlFile(name));
 }
 
-export async function dashboardSnapshot(db: AnalysisDatabase, options: ReportOptions) {
+export async function dashboardSnapshot(db: AnalysisDatabase, options: ReportOptions, singlePeriod = false) {
   const daily = await report(db, 'active');
   const lastDay = daily.at(-1)?.day;
-  const periods = [];
+  const ranges = [];
   if (typeof lastDay === 'string') {
     const to = new Date(Date.parse(lastDay) + 86_400_000).toISOString().slice(0, 10);
-    const lengths = [daily.length, ...[180, 30, 14, 7].filter((days) => days < daily.length)];
+    const lengths = singlePeriod ? [daily.length] : [daily.length, ...[180, 30, 14, 7].filter((days) => days < daily.length)];
     for (const days of lengths) {
       const from = daily.at(-days)?.day;
       if (typeof from !== 'string') throw new Error('Missing snapshot period start');
-      const sources = await query(db, `SELECT * FROM acquisition_between(?::DATE, ?::DATE)
-        ORDER BY sessions DESC, source, utm_medium, utm_campaign LIMIT 8`, [from, to]);
-      periods.push({ days, from, to, sources });
+      ranges.push({ days, from, to });
     }
   }
+  const specs = ranges.map(({ from, to }) => ({ period_start: from, period_end: to }));
+  const acquisitions = specs.length === 0 ? []
+    : await query(db, await sqlFile('dashboard-acquisition'), [JSON.stringify(specs)]);
+  const periods = ranges.map((range) => {
+    const rows = acquisitions.filter((item) => item.period_start === range.from && item.period_end === range.to);
+    const sources = rows.filter((item) => item.day === null)
+      .map(({ source, utm_medium, utm_campaign, sessions, users, page_views }) => ({ source, utm_medium, utm_campaign, sessions, users, page_views }));
+    const dailySources = daily.slice(-range.days).map(({ day }) => ({
+      day, sessionsBySource: sources.map(() => '0'), otherSessions: '0',
+    }));
+    const days = new Map(dailySources.map((row) => [row.day, row]));
+    for (const row of rows) {
+      if (row.day === null) continue;
+      const point = days.get(row.day);
+      if (!point) throw new Error('Acquisition day outside the selected period');
+      if (row.source_rank === null) point.otherSessions = String(row.sessions);
+      else point.sessionsBySource[Number(row.source_rank) - 1] = String(row.sessions);
+    }
+    return { ...range, sources, dailySources };
+  });
+  const [receipt] = await query(db, `
+    SELECT strftime(max(received_at), '%Y-%m-%dT%H:%M:%S.%gZ') AS latest FROM visible_events
+  `);
+  const latestReceivedAt = typeof receipt?.latest === 'string' ? receipt.latest : null;
   const { app, from, to, timeZone, observedUntil, knownAt } = options;
-  return { version: 1, app, from, to, timeZone, observedUntil, knownAt, daily, sources: periods[0]?.sources ?? [], periods };
+  return { version: 1, app, from, to, timeZone, observedUntil, knownAt, latestReceivedAt, daily,
+    sources: periods[0]?.sources ?? [], periods };
 }
 
 export async function pack(paths: string[], destination: string) {

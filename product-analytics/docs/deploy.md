@@ -1,37 +1,8 @@
-# デプロイと日次更新
+# デプロイと運用
 
 以下のコマンドは `product-analytics` ディレクトリで実行してください。収集用 Worker と閲覧用ダッシュボードは別のホスト名にします。初回はアプリの Origin とイベントを `events/projects.ts` に登録し、`pnpm install --frozen-lockfile` と `pnpm exec wrangler login` を実行してください。
 
-## Basin と R2 Parquet
-
-Workers Paid を有効にしてから、R2 バケット、Stream、Parquet Sink、Pipeline を順に作成します。Stream の HTTP エンドポイントは停止し、検証を行う収集 Worker から Binding で書き込みます。
-
-```sh
-pnpm exec wrangler r2 bucket create product-analytics-events
-pnpm exec wrangler basin pipelines streams create product_analytics_stream \
-  --schema-file collector/basin-schema.json --no-http-enabled
-pnpm exec wrangler basin pipelines sinks create product_analytics_sink \
-  --type r2 --bucket product-analytics-events --format parquet --compression zstd \
-  --path events/v1 --partitioning 'year=%Y/month=%m/day=%d' --roll-size 64 --roll-interval 300
-pnpm exec wrangler basin pipelines create product_analytics_pipe --sql-file collector/basin.sql
-```
-
-Sink 作成時に Wrangler が R2 の書き込み認証情報を生成できる権限を用意してください。Stream の出力に表示された ID を `wrangler.production.jsonc` の `stream` に入れます。
-
-```sh
-cp wrangler.production.example.jsonc wrangler.production.jsonc
-pnpm exec wrangler deploy --config wrangler.production.jsonc --dry-run
-pnpm exec wrangler secret put SERVER_TOKENS --config wrangler.production.jsonc
-pnpm exec wrangler deploy --config wrangler.production.jsonc
-```
-
-`SERVER_TOKENS` の値は `{"your-project":"…","another-project":"…"}` の形式です。アプリごとに異なる24文字以上の値を安全な乱数で生成し、アプリのバックエンドにも設定してください。`openssl rand -hex 32` で生成できます。デプロイ先の Worker URL をトラッカーの `collectorOrigin` に設定します。
-
-初回は許可済み Origin のフロントから1バッチ、正式な鍵を持つバックエンドから1バッチを送り、HTTP 204 を確認します。ロール後に R2 の `events/v1/` に Parquet が現れることと、次の CLI で該当プロジェクトを集計できることを確認してください。
-
-[Basin Stream 管理](https://developers.cloudflare.com/basin-pipelines/streams/manage-streams/)、[Basin R2 Sink](https://developers.cloudflare.com/basin-pipelines/sinks/available-sinks/r2/)、[Basin 入門](https://developers.cloudflare.com/basin-pipelines/getting-started/)。
-
-## 少量の R2 直接保存
+## 収集 Worker と R2 をデプロイする
 
 以下のコマンドは `wrangler.jsonc` の R2 Binding を使います。別のバケット名を使う場合は設定ファイル内の名前も変更してください。同じ名前の Worker をデプロイすると、使用する保存先が切り替わります。
 
@@ -40,6 +11,8 @@ pnpm exec wrangler r2 bucket create product-analytics-raw
 pnpm exec wrangler secret put SERVER_TOKENS
 pnpm exec wrangler deploy
 ```
+
+`SERVER_TOKENS` はアプリ ID をキーとする JSON オブジェクトです。アプリごとに異なる24文字以上の乱数を使い、同じ値をバックエンドに設定します。デプロイ先の収集 Worker URL を Snowplow トラッカーの `collectorOrigin` に設定します。フロントとバックエンドから各1バッチを送り、HTTP 204 と R2 への保存を確認します。
 
 R2 の読み取り鍵を設定した AWS CLI で、分析対象のデータを差分同期できます。ローカルへの同期後、受信日ごとに `pack` すると、繰り返しの集計で多数の小ファイルを開く時間を減らせます。
 
@@ -59,7 +32,6 @@ pnpm run analytics pack --source 'local-data/raw/2026-11-27/*/*.ndjson.gz' \
 R2 のライフサイクルは保存したオブジェクトの作成日から数えます。180日とする場合の設定例です。実行前に保存期間を確認してください。
 
 ```sh
-pnpm exec wrangler r2 bucket lifecycle add product-analytics-events expire-events events/v1/ --expire-days 180
 pnpm exec wrangler r2 bucket lifecycle add product-analytics-raw expire-events raw/v1/ --expire-days 180
 ```
 
@@ -71,18 +43,50 @@ R2 バケットを限定した読み取り専用の S3 API キーを発行し、
 
 ```sh
 pnpm run analytics active \
-  --source 'r2://product-analytics-events/events/v1/**/*.parquet' \
+  --source 'r2://product-analytics-raw/raw/v1/**/*.ndjson.gz' \
   --app demo --from 2026-11-01 --to 2026-11-27
 ```
 
-Basin を使わない場合は、例えば `r2://product-analytics-raw/raw/v1/**/*.ndjson.gz` を指定できます。移行中は `--source` を複数指定し、旧形式と新形式を同じレポートで扱えます。各グロブには最低1ファイルが必要です。R2 の一覧と読み取りができる資格情報を使います。探索 SQL は端末上で実行するため、信頼する SQL ファイルを渡してください。
+受信日ごとにまとめた Parquet を使う場合は、そのパスまたは R2 グロブを指定できます。移行中は `--source` を複数指定し、旧形式と新形式を同じレポートで扱えます。各グロブには最低1ファイルが必要です。R2 の一覧と読み取りができる資格情報を使います。探索 SQL は端末上で実行するため、信頼する SQL ファイルを渡してください。
 
 [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/)、[DuckDB の R2 対応](https://duckdb.org/docs/stable/core_extensions/httpfs/s3api.html)。
 
-## ダッシュボードを実行する
+## DuckDB のクエリサーバーを起動する
 
-ローカルで `pnpm run demo:prepare` を実行し、`pnpm run dashboard` を起動してください。最初の API リクエストで DuckDB がサンプル Parquet を集計します。サーバーは180日分の集計結果を同じプロセスのメモリーに1時間保持し、複数のリクエストが同時に来た場合は一つの集計結果を共有します。
+既存の Node.js 実行環境で `pnpm install --frozen-lockfile` を実行し、次の環境変数をサービスに設定します。R2 用のキーには原本のバケットだけを許可してください。
 
-ブラウザーが取得するのは、選択した期間の集計結果です。たとえば初期表示では `GET /api/dashboard?days=30` を使います。レスポンスの `Cache-Control: private, max-age=60` でブラウザーに最長60秒保持されます。再検証時の `If-None-Match` が現在の `ETag` と一致すると、本文なしの HTTP 304 を返します。
+| 環境変数 | 値 |
+| --- | --- |
+| `ANALYTICS_APP` | 集計対象のプロジェクト ID。例は `demo` です。 |
+| `ANALYTICS_SOURCE` | 集計元の Parquet または gzip NDJSON。R2 グロブも指定できます。 |
+| `ANALYTICS_QUERY_TOKEN` | Worker と共有する32文字以上の乱数。 |
+| `R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` | R2 を読む場合の読み取り専用認証情報。 |
+| `ANALYTICS_TIME_ZONE` | 暦日集計のタイムゾーン。既定は `Asia/Tokyo` です。 |
+| `ANALYTICS_MAX_INGEST_LAG_HOURS` | 指定時に、集計対象の最終受信から許容する時間。 |
+| `ANALYTICS_QUERY_TIMEOUT_MS` | 指定時に、クエリを中止するまでのミリ秒。 |
 
-HTTP API はローカルの試作です。上のクラウド向けコマンドは収集 Worker と R2 への保存を対象にしています。
+```sh
+pnpm run dashboard:query
+```
+
+サーバーは既定で `127.0.0.1:8080` で待ち受けます。既存の HTTPS リバースプロキシなどを使い、Worker から `https://query.example.com` へアクセスできるようにします。クエリサーバーは `/api/dashboard/{7,14,30,180}` の認証済み GET と HEAD を受け付けます。SQL・対象アプリ・データ源・日付の基準はサーバー側で決めます。
+
+## ダッシュボードをデプロイする
+
+1. ダッシュボード専用ホスト名を Cloudflare Access の自社管理アプリに登録し、閲覧を許可するユーザーの Allow ポリシーを設定します。Application Audience (AUD) とチーム URL を控えます。
+2. Worker のシークレットファイルにクエリサーバーと同じ `ANALYTICS_QUERY_TOKEN` を格納します。JSON または dotenv 形式にし、リポジトリ外に置きます。
+
+```sh
+ANALYTICS_ACCESS_TEAM=https://example.cloudflareaccess.com \
+ANALYTICS_ACCESS_AUDIENCE="$ACCESS_APP_AUD" \
+ANALYTICS_QUERY_URL=https://query.example.com \
+node dashboard/deploy-config.ts analytics.example.com demo
+pnpm run build:dashboard
+pnpm exec wrangler deploy --config wrangler.dashboard.generated.json --secrets-file "$ANALYTICS_SECRETS_FILE"
+```
+
+許可したアカウントで画面と `/api/dashboard/30` を開き、未ログインのブラウザーで同じ URL を開いて Access の認証を確認します。Worker は JWT の署名・発行元・AUD・期限を検証し、クエリサーバーへ共有トークンを添えて取得を依頼します。
+
+クエリサーバーは最初のリクエストと有効期限後の最初のリクエストで SQL を実行します。期間ごとに、集計の基準時刻から1時間は同じ結果を再利用します。同時に到着したリクエストは1件の集計を共有します。画面からの再取得はサーバーが返す有効期限に従います。プロセスを再起動すると次のリクエストで再計算します。
+
+[Cloudflare Access の自社管理アプリ](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/) · [業務運用と計測](business-operations.md)

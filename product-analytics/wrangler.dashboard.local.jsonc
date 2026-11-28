@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "product-analytics-dashboard-local",
+  "main": "dashboard/development-worker.ts",
+  "compatibility_date": "2026-11-27",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "ANALYTICS_QUERY_URL": "http://127.0.0.1:8080",
+    "ANALYTICS_QUERY_TOKEN": "local-dashboard-token-for-loopback-only"
+  },
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true, "not_found_handling": "none" }
+}

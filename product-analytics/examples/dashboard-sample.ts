@@ -49,7 +49,12 @@ const late = decodeBatch({
 
 const raw = 'local-data/preview/events.ndjson';
 const parquet = 'local-data/preview/events.parquet';
+const output = 'dashboard/public/snapshot.json';
 await mkdir('local-data/preview', { recursive: true });
-await writeFile(raw, [...days.flat(), ...(values['include-late'] ? late : [])].map((event) => JSON.stringify(event)).join('\n') + '\n');
+await writeFile(raw, [...days.flat(), ...late].map((event) => JSON.stringify(event)).join('\n') + '\n');
 await run(process.execPath, ['analysis/cli.ts', 'pack', '--source', raw, '--output', parquet]);
-console.info(`Wrote ${parquet} (${values['include-late'] ? 'includes 5 late events' : 'before 5 late events arrived'}).`);
+await run(process.execPath, ['analysis/cli.ts', 'snapshot', '--source', parquet, '--app', 'demo', '--last-days', '180',
+  '--tz', 'Asia/Tokyo', '--observed-until', '2026-11-26T15:00:00Z',
+  '--known-at', values['include-late'] ? '2026-11-27T02:00:00Z' : '2026-11-27T00:00:00Z',
+  '--output', output]);
+console.info(`Wrote ${output} (${values['include-late'] ? 'includes 5 late events' : 'before 5 late events arrived'}).`);

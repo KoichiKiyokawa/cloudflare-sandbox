@@ -18,7 +18,12 @@ export const sharedEvents = validators([assigned, exposed, identity]);
 
 export const projects = new Map([
   ['demo', {
-    origins: ['http://127.0.0.1:5173', 'http://127.0.0.1:5182', 'https://demo.example'],
+    origins: ['http://127.0.0.1:5173', 'https://demo.example'],
     events: validators(demo),
+    serverOnlyEvents: ['purchase_completed'],
   }],
 ]);
+
+export function serverOnlyEventNames(appId: string) {
+  return ['identity_linked', ...(projects.get(appId)?.serverOnlyEvents ?? [])];
+}

@@ -1,12 +1,11 @@
 import type { Crypto as WorkerCrypto } from '@cloudflare/workers-types/index.ts';
-import type { Pipeline } from 'cloudflare:pipelines';
 import { projects } from '../events/projects.ts';
 import { decodeBatch } from './protocol.ts';
 
-type CollectorEnv = Pick<Cloudflare.Env, 'SERVER_TOKENS'> & (
-  | { EVENTS: Pipeline; RAW_EVENTS?: never }
-  | { EVENTS?: never; RAW_EVENTS: R2Bucket }
-);
+type CollectorEnv = Pick<Cloudflare.Env, 'SERVER_TOKENS'> & {
+  BROWSER_RATE_LIMIT?: RateLimit;
+  RAW_EVENTS: R2Bucket;
+};
 
 declare const crypto: WorkerCrypto;
 
@@ -81,6 +80,14 @@ export default {
       }
     }
     if (request.method !== 'POST') return new Response(null, { status: 405, headers: cors });
+    if (source === 'browser' && env.BROWSER_RATE_LIMIT) {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+      const { success } = await env.BROWSER_RATE_LIMIT.limit({ key: `ingest:${appId}:${ip}` });
+      if (!success) {
+        cors.set('Retry-After', '60');
+        return new Response(null, { status: 429, headers: cors });
+      }
+    }
     if (source === 'server' && !await isAuthorized(request.headers.get('Authorization'), getServerToken(env.SERVER_TOKENS, appId))) {
       return new Response(null, { status: 401 });
     }
@@ -95,19 +102,11 @@ export default {
     }
 
     try {
-      if (env.EVENTS) {
-        await env.EVENTS.send(events.map((event) => ({ ...event })));
-      } else if (env.RAW_EVENTS) {
-        const key = `raw/v1/${receivedAt.slice(0, 10)}/${appId}/${crypto.randomUUID()}.ndjson.gz`;
-        const lines = events.map((event) => JSON.stringify(event)).join('\n') + '\n';
-        const compressed = new Blob([lines]).stream().pipeThrough(new CompressionStream('gzip'));
-        const bytes = await new Response(compressed).arrayBuffer();
-        await env.RAW_EVENTS.put(key, bytes, {
-          httpMetadata: { contentType: 'application/gzip' },
-        });
-      } else {
-        throw new Error('storage binding is missing');
-      }
+      const key = `raw/v1/${receivedAt.slice(0, 10)}/${appId}/${crypto.randomUUID()}.ndjson.gz`;
+      const lines = events.map((event) => JSON.stringify(event)).join('\n') + '\n';
+      const compressed = new Blob([lines]).stream().pipeThrough(new CompressionStream('gzip'));
+      const bytes = await new Response(compressed).arrayBuffer();
+      await env.RAW_EVENTS.put(key, bytes, { httpMetadata: { contentType: 'application/gzip' } });
     } catch (error) {
       console.error({ message: 'event storage failed', appId, source, errorType: error instanceof Error ? error.name : 'unknown' });
       cors.set('Retry-After', '5');

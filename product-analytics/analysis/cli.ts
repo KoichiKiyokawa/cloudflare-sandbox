@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
-import { dashboardSnapshot, openAnalysis, pack, query, report, reports, type ReportOptions } from './database.ts';
+import { dashboardSnapshot, openAnalysis, pack, query, report, reports, rollingReportDates, type ReportOptions } from './database.ts';
 
 const help = `Usage
   pnpm run analytics <${reports.join('|')}|query|snapshot> --source PATH --app APP --from YYYY-MM-DD --to YYYY-MM-DD
@@ -18,7 +18,7 @@ Options
   segment: --property JSON_PATH [--event NAME]
   experiment: --experiment ID --conversion NAME
   query: --sql-file PATH
-  snapshot: [--last-days 180 | --from YYYY-MM-DD --to YYYY-MM-DD] [--output FILE.json]
+  snapshot: [--last-days 180 | --from YYYY-MM-DD --to YYYY-MM-DD] [--output FILE.json] [--profile] [--max-ingest-lag-hours NUMBER]
 `;
 
 function requireDate(value: string | undefined, flag: string) {
@@ -57,6 +57,8 @@ async function main() {
       'sql-file': { type: 'string' },
       output: { type: 'string' },
       'last-days': { type: 'string' },
+      profile: { type: 'boolean' },
+      'max-ingest-lag-hours': { type: 'string' },
     },
   });
   const [command] = positionals;
@@ -66,6 +68,12 @@ async function main() {
   }
   if (positionals.length !== 1) throw new Error('Use one subcommand');
   const paths = values.source ?? [];
+  if (values.profile && command !== 'snapshot') throw new Error('--profile is only supported by snapshot');
+  const lag = values['max-ingest-lag-hours'];
+  const lagHours = lag === undefined ? null : Number(lag);
+  if (lagHours !== null && (command !== 'snapshot' || !Number.isFinite(lagHours) || lagHours <= 0)) {
+    throw new Error('--max-ingest-lag-hours is a positive number for snapshot');
+  }
   if (command === 'pack') {
     if (!values.output) throw new Error('pack requires --output');
     await pack(paths, values.output);
@@ -93,9 +101,7 @@ async function main() {
     if (command !== 'snapshot' || values.from || values.to || !Number.isInteger(days) || days < 1 || days > 366) {
       throw new Error('--last-days is for snapshot, between 1 and 366 days, without --from or --to');
     }
-    const parts = new Map(dateFormat.formatToParts(new Date(observedUntil)).map((part) => [part.type, part.value]));
-    to = `${parts.get('year')}-${parts.get('month')}-${parts.get('day')}`;
-    from = new Date(Date.parse(to) - days * 86_400_000).toISOString().slice(0, 10);
+    ({ from, to } = rollingReportDates(observedUntil, days, dateFormat));
   } else {
     from = requireDate(values.from, '--from');
     to = requireDate(values.to, '--to');
@@ -119,11 +125,21 @@ async function main() {
   const sql = values['sql-file'];
   if (command === 'query' && !sql) throw new Error('query requires --sql-file');
 
-  const db = await openAnalysis(paths, options);
+  const started = performance.now();
+  const db = await openAnalysis(paths, options, values.profile);
+  const loaded = performance.now();
   try {
+    const snapshot = command === 'snapshot' ? await dashboardSnapshot(db, options) : undefined;
+    if (snapshot && lagHours !== null) {
+      const latest = snapshot.latestReceivedAt;
+      if (!latest || Date.parse(knownAt) - Date.parse(latest) > lagHours * 3_600_000) {
+        throw new Error(`Snapshot was not written because latest eligible receipt (${latest ?? 'none'}) exceeds ${lagHours} hours`);
+      }
+    }
     const result = reportName ? await report(db, reportName)
       : sql && command === 'query' ? await query(db, await readFile(sql, 'utf8'))
-      : await dashboardSnapshot(db, options);
+      : snapshot;
+    const computed = performance.now();
     const json = JSON.stringify(result, null, 2) + '\n';
     if (values.output) {
       await mkdir(dirname(values.output), { recursive: true });
@@ -136,6 +152,19 @@ async function main() {
       }
     } else {
       process.stdout.write(json);
+    }
+    if (values.profile) {
+      const remote = paths.some((path) => path.startsWith('r2://'));
+      const httpRequests = remote ? await query(db, `
+        SELECT request.type AS method, response.status AS status, count(*) AS requests
+        FROM duckdb_logs_parsed('HTTP')
+        GROUP BY ALL ORDER BY method, status
+      `) : [];
+      process.stderr.write(JSON.stringify({
+        load_ms: Math.round(loaded - started), query_ms: Math.round(computed - loaded),
+        total_ms: Math.round(computed - started), peak_rss_bytes: process.resourceUsage().maxRSS * 1024,
+        http_requests: httpRequests,
+      }) + '\n');
     }
   } finally {
     db.close();

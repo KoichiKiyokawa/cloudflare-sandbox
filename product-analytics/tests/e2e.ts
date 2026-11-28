@@ -9,20 +9,19 @@ import { parseArgs, promisify } from 'node:util';
 import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
-import { dashboardDev } from '../analysis/dashboard-dev.ts';
-import { parseSnapshot } from '../dashboard/snapshot.ts';
 import { sendServerEvents } from '../examples/server.ts';
+import { cacheRemainingHeader, dashboardReportPeriod } from '../dashboard/query-endpoint.ts';
 import identitySchema from '../events/identity_linked.json' with { type: 'json' };
 
 const run = promisify(execFile);
-const { values } = parseArgs({ options: { 'out-dir': { type: 'string' } } });
+const { values } = parseArgs({ options: { 'out-dir': { type: 'string' }, 'reuse-dashboard': { type: 'boolean' } } });
 const temporary = await mkdtemp(join(tmpdir(), 'product-analytics-e2e-'));
 const output = values['out-dir'] ? resolve(values['out-dir']) : temporary;
 const rawDirectory = join(temporary, 'r2');
 const packed = join(output, 'events.parquet');
 const snapshot = join(output, 'snapshot.json');
 const sqlFile = join(temporary, 'query.sql');
-const dashboardOrigin = 'http://127.0.0.1:5182';
+const initialSnapshot = join(temporary, 'initial-snapshot.json');
 const token = 'demo-local-token-for-integration-only';
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js');
 await mkdir(rawDirectory, { recursive: true });
@@ -39,6 +38,7 @@ try {
       name: 'product-analytics', modules: true, script: await readFile(join(temporary, 'worker', 'worker.js'), 'utf8'),
       compatibilityDate: '2026-11-27', bindings: { SERVER_TOKENS: JSON.stringify({ demo: token }) },
       r2Buckets: { RAW_EVENTS: 'product-analytics-e2e' },
+      ratelimits: { BROWSER_RATE_LIMIT: { namespace_id: '217110', simple: { limit: 10, period: 60 } } },
     }],
   }));
   const collector = (await worker.ready).origin;
@@ -48,16 +48,12 @@ try {
     method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: 'x'.repeat(256 * 1024 + 1),
   })).status, 413);
 
-  let snapshotBuilds = 0;
-  vite = await createServer({
-    mode: 'test',
-    plugins: [dashboardDev(async () => {
-      snapshotBuilds += 1;
-      return JSON.parse(await readFile(snapshot, 'utf8'));
-    })],
-    server: { host: '127.0.0.1', port: 5182, strictPort: true },
-  });
-  await vite.listen();
+  if (values['reuse-dashboard']) {
+    assert.equal((await fetch('http://127.0.0.1:5173/collector-demo.html')).status, 200);
+  } else {
+    vite = await createServer({ server: { host: '127.0.0.1', port: 5173, strictPort: true } });
+    await vite.listen();
+  }
   browser = await chromium.launch(process.env.CHROME_BIN
     ? { executablePath: process.env.CHROME_BIN } : { channel: 'chrome' });
   const page = await browser.newPage();
@@ -75,11 +71,11 @@ try {
     if (failedBody) return route.continue();
     failedBody = body;
     return route.fulfill({
-      status: 503, headers: { 'Access-Control-Allow-Origin': dashboardOrigin },
+      status: 503, headers: { 'Access-Control-Allow-Origin': 'http://127.0.0.1:5173' },
     });
   });
 
-  await page.goto(`${dashboardOrigin}/collector-demo.html?collector=${encodeURIComponent(collector)}&utm_source=mail&secret=exclude`);
+  await page.goto(`http://127.0.0.1:5173/collector-demo.html?collector=${encodeURIComponent(collector)}&utm_source=mail&secret=exclude`);
   await page.getByRole('button', { name: '料金画面を開く' }).click();
   const anonymousId = (await page.getByTestId('anonymous-id').textContent()) ?? '';
   const sessionId = (await page.getByTestId('session-id').textContent()) ?? '';
@@ -104,7 +100,7 @@ try {
 
   // Simulate a response lost after Cloudflare accepted it.
   assert.equal((await fetch(`${collector}/v1/browser/demo`, {
-    method: 'POST', headers: { Origin: dashboardOrigin }, body: requests[1],
+    method: 'POST', headers: { Origin: 'http://127.0.0.1:5173' }, body: requests[1],
   })).status, 204);
 
   const config = {
@@ -147,32 +143,61 @@ try {
   const rollingParams = ['--source', packed, '--app', 'demo', '--last-days', '180',
     '--tz', 'UTC', '--observed-until', `${to}T00:00:00Z`];
   await cli('snapshot', ...rollingParams, '--output', snapshot);
+  await cli('snapshot', ...rollingParams, '--known-at', '2020-01-01T00:00:00Z', '--output', initialSnapshot);
+  const original = await readFile(initialSnapshot, 'utf8');
+  await assert.rejects(cli('snapshot', ...rollingParams, '--known-at', '2020-01-01T00:00:00Z',
+    '--max-ingest-lag-hours', '30', '--output', initialSnapshot), /latest eligible receipt/);
+  assert.equal(await readFile(initialSnapshot, 'utf8'), original);
   const rangeStart = (days: number) => new Date(Date.parse(to) - days * 86_400_000).toISOString().slice(0, 10);
   assert.equal(JSON.parse(await readFile(snapshot, 'utf8')).from, rangeStart(180));
 
-  const [month, halfYear] = await Promise.all([30, 180].map((days) =>
-    fetch(`${dashboardOrigin}/api/dashboard?days=${days}`)));
-  assert.equal(month.status, 200);
-  assert.equal(month.headers.get('Cache-Control'), 'private, max-age=60');
-  assert.equal(parseSnapshot(await month.json()).daily.length, 30);
-  assert.equal(parseSnapshot(await halfYear.json()).daily.length, 180);
-  assert.equal(snapshotBuilds, 1);
-
-  const etag = month.headers.get('ETag');
-  assert.ok(etag);
-  const unchanged = await fetch(`${dashboardOrigin}/api/dashboard?days=30`, { headers: { 'If-None-Match': etag } });
-  assert.equal(unchanged.status, 304);
-  assert.equal(await unchanged.text(), '');
-
-  const dashboardRequests: string[] = [];
-  page.on('request', (request) => {
-    const url = new URL(request.url());
-    if (url.pathname === '/api/dashboard') dashboardRequests.push(url.search);
+  let publishedSnapshot = initialSnapshot;
+  let rejectRefresh = false;
+  await page.route('http://127.0.0.1:5173/api/dashboard/*', async (route) => {
+    if (rejectRefresh) return route.fulfill({ status: 503 });
+    const days = dashboardReportPeriod(new URL(route.request().url()).pathname);
+    const full = JSON.parse(await readFile(publishedSnapshot, 'utf8'));
+    const period = full.periods.find((item: { days: number }) => item.days === days);
+    assert.ok(period);
+    return route.fulfill({
+      json: { ...full, from: period.from, daily: full.daily.slice(-period.days), periods: [period] },
+      headers: { [cacheRemainingHeader]: '3600000' },
+    });
   });
-  await page.goto(dashboardOrigin + '/');
+  await page.clock.install();
+  await page.goto('http://127.0.0.1:5173/');
   await page.getByRole('heading', { name: 'demo' }).waitFor();
-  assert.deepEqual(dashboardRequests, ['?days=30']);
+  await page.getByText('最終集計から30時間以上経過しています。').waitFor();
+  assert.equal(await page.locator('dl.cards dd').first().textContent(), '0');
+  publishedSnapshot = snapshot;
+  await page.clock.fastForward(5 * 60_000);
+  assert.equal(await page.locator('dl.cards dd').first().textContent(), '0');
+  await page.clock.fastForward(55 * 60_000);
+  await page.waitForFunction(() => document.querySelector('dl.cards dd')?.textContent === '1');
+  await page.getByText('最終集計から30時間以上経過しています。').waitFor({ state: 'hidden' });
+  const livePeriod = page.getByRole('combobox', { name: '期間' });
+  await livePeriod.selectOption('7');
+  await page.getByText(`${rangeStart(7)} から ${to} 未満 · UTC`).waitFor();
+  await livePeriod.selectOption('30');
+  await page.getByText(`${rangeStart(30)} から ${to} 未満 · UTC`).waitFor();
+  rejectRefresh = true;
+  await page.getByRole('button', { name: '最新の集計を読む' }).click();
+  await page.getByRole('alert').filter({ hasText: '前回の集計を表示しています' }).waitFor();
+  await page.getByLabel('集計 JSON を開く').setInputFiles(snapshot);
+  await page.getByText('ローカルファイルを表示中').waitFor();
+  assert.equal(await page.getByRole('alert').count(), 0);
   assert.equal(await page.locator('dl.cards dd').allTextContents().then((texts) => texts.join(',')), '1,1,1,2,1');
+  const dailyPanel = page.getByRole('region', { name: '日次の推移' });
+  const sourcePanel = page.getByRole('region', { name: '流入元別セッション' });
+  const sourceChart = sourcePanel.getByRole('img', { name: '流入元別セッションの日次推移' });
+  await sourceChart.locator('canvas').first().waitFor();
+  assert.match((await sourceChart.getAttribute('aria-description')) ?? '', /mail.*1 セッション/);
+  assert.match((await sourcePanel.getByRole('list', { name: '選択期間の流入元割合' }).textContent()) ?? '', /mail.*%/);
+  const composition = sourcePanel.getByRole('button', { name: '構成比' });
+  await composition.click();
+  assert.equal(await composition.getAttribute('aria-pressed'), 'true');
+  assert.equal(await sourcePanel.getByRole('button', { name: '件数' }).getAttribute('aria-pressed'), 'false');
+  assert.deepEqual(await dailyPanel.getByRole('group', { name: '日次の指標' }).getByRole('button').allTextContents(), ['DAU', 'PV']);
   const goal = page.getByRole('spinbutton', { name: '目標値' });
   const dauChart = page.getByRole('img', { name: '日間アクティブユーザーの推移' });
   await goal.waitFor();
@@ -185,6 +210,7 @@ try {
   assert.equal(await pv.getAttribute('aria-pressed'), 'true');
   const pvChart = page.getByRole('img', { name: 'ページビューの推移' });
   await pvChart.locator('canvas').first().waitFor();
+  assert.equal(await sourceChart.isVisible(), true);
   assert.equal(await goal.inputValue(), '40');
   assert.equal(await pvChart.getAttribute('aria-description'), '目標 40');
   assert.equal(await page.getByRole('table').count(), 0);
@@ -203,26 +229,25 @@ try {
   assert.equal(csv.at(-1), `${from},1,2`);
   await period.selectOption({ label: '直近半年（180日）' });
   await page.getByText(`${rangeStart(180)} から ${to} 未満 · UTC`).waitFor();
-  assert.deepEqual(dashboardRequests, ['?days=30', '?days=7', '?days=180']);
-  assert.equal(snapshotBuilds, 1);
   const halfYearDownload = page.waitForEvent('download');
   await page.getByRole('link', { name: '日別 CSV をダウンロード' }).click();
   const halfYearRows = (await readFile(await (await halfYearDownload).path(), 'utf8')).trimEnd().split('\r\n');
   assert.equal(halfYearRows.length, 181);
   assert.equal(halfYearRows[1], `${rangeStart(180)},0,0`);
   assert.equal(halfYearRows.at(-1), `${from},1,2`);
-  await page.getByRole('button', { name: '流入元', exact: true }).click();
-  assert.equal(await goal.count(), 0);
-  const sourceChart = page.getByRole('img', { name: '流入元別セッションの内訳' });
-  await sourceChart.locator('canvas').first().waitFor();
+  assert.equal(await goal.isVisible(), true);
   assert.match((await sourceChart.getAttribute('aria-description')) ?? '', /mail.*1 セッション/);
   await page.setViewportSize({ width: 375, height: 780 });
   await page.waitForFunction(() => {
-    const chart = document.querySelector('.daily-chart');
-    const canvas = chart?.querySelector('canvas');
+    const charts = Array.from(document.querySelectorAll('.report-chart'));
     return document.documentElement.scrollWidth <= innerWidth
-      && Boolean(chart && canvas && canvas.getBoundingClientRect().width <= chart.getBoundingClientRect().width + 1);
+      && charts.length === 2
+      && charts.every((chart) => {
+        const canvas = chart.querySelector('canvas');
+        return canvas && canvas.getBoundingClientRect().width <= chart.getBoundingClientRect().width + 1;
+      });
   });
+  rejectRefresh = false;
   await page.reload();
   await goal.waitFor();
   assert.equal(await goal.inputValue(), '55');
@@ -230,7 +255,7 @@ try {
   assert.deepEqual(browserErrors, []);
 
   const exitPage = await browser.newPage();
-  await exitPage.goto(`${dashboardOrigin}/collector-demo.html?collector=${encodeURIComponent(collector)}`);
+  await exitPage.goto(`http://127.0.0.1:5173/collector-demo.html?collector=${encodeURIComponent(collector)}`);
   const leavingRequest = exitPage.waitForRequest((request) => request.method() === 'POST' && request.url() === `${collector}/v1/browser/demo`, { timeout: 3500 });
   await exitPage.getByRole('link', { name: '分析画面へ移動' }).click();
   const leaving = await leavingRequest;
@@ -247,6 +272,19 @@ try {
   }
   assert.ok(savedAfterDeparture, `the page departure POST must reach R2 (${leaving.failure()?.errorText ?? 'no browser error'})`);
   await exitPage.close();
+  let limited = false;
+  for (let attempt = 0; attempt < 13 && !limited; attempt++) {
+    const response = await fetch(`${collector}/v1/browser/demo`, {
+      method: 'POST', headers: { Origin: 'http://127.0.0.1:5173' }, body: '{}',
+    });
+    if (response.status === 429) {
+      assert.equal(response.headers.get('Retry-After'), '60');
+      limited = true;
+    } else {
+      assert.equal(response.status, 400);
+    }
+  }
+  assert.ok(limited, 'an isolated browser request burst must be limited');
   console.info('E2E passed: browser and Node trackers, Worker, R2, Parquet, DuckDB and Solid 2 dashboard.');
   if (values['out-dir']) console.info(`Sample files saved in ${output}`);
 } finally {

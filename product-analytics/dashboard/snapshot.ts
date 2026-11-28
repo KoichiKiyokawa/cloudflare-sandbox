@@ -21,6 +21,7 @@ export interface Period {
   from: string;
   to: string;
   sources: TrafficSource[];
+  dailySources?: { day: string; sessionsBySource: number[]; otherSessions: number }[];
 }
 
 export interface Snapshot {
@@ -30,9 +31,9 @@ export interface Snapshot {
   timeZone: string;
   observedUntil: string;
   knownAt: string;
+  latestReceivedAt: string | null;
   daily: Daily[];
   periods: Period[];
-  availableDays?: number[];
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -85,13 +86,20 @@ export function parseSnapshot(value: unknown): Snapshot {
   const periods = Array.isArray(data.periods) && data.periods.length > 0
     ? data.periods.map((item) => {
       const period = object(item);
-      return { days: count(period.days), from: date(period.from), to: date(period.to), sources: sources(period.sources) };
+      const traffic = sources(period.sources);
+      const dailySources = Array.isArray(period.dailySources) ? period.dailySources.map((item) => {
+        const row = object(item);
+        if (!Array.isArray(row.sessionsBySource) || row.sessionsBySource.length !== traffic.length) {
+          throw new Error('日別の流入元とセッション数が対応していません。');
+        }
+        return { day: date(row.day), sessionsBySource: row.sessionsBySource.map(count), otherSessions: count(row.otherSessions) };
+      }) : undefined;
+      return { days: count(period.days), from: date(period.from), to: date(period.to), sources: traffic, dailySources };
     })
     : [{ days: daily.length, from, to, sources: sources(data.sources) }];
 
-  const availableDays = Array.isArray(data.availableDays)
-    ? data.availableDays.filter((item: unknown): item is number => item === 7 || item === 14 || item === 30 || item === 180)
-    : undefined;
+  const latestReceivedAt = typeof data.latestReceivedAt === 'string' && Number.isFinite(Date.parse(data.latestReceivedAt))
+    ? data.latestReceivedAt : null;
   return { app: text(data.app), from, to, timeZone, observedUntil: text(data.observedUntil),
-    knownAt: text(data.knownAt), daily, periods, availableDays };
+    knownAt: text(data.knownAt), latestReceivedAt, daily, periods };
 }

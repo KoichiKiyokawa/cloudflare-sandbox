@@ -13,44 +13,38 @@ WITH parsed AS (
   FROM stored_events
   WHERE app_id = (SELECT app_id FROM report_params)
     AND received_at::TIMESTAMPTZ <= (SELECT known_at FROM report_params)
+),
+eligible AS (
+  SELECT * FROM parsed
+  WHERE source = 'server' OR NOT coalesce(list_contains(
+    (SELECT server_only_events FROM report_params),
+    snowplow_custom_event_name(snowplow_custom_event(raw))
+  ), false)
   QUALIFY row_number() OVER (
-    PARTITION BY app_id, event_id ORDER BY received_at::TIMESTAMPTZ, source, payload_json
+    PARTITION BY app_id, event_id ORDER BY received_at, source, raw::VARCHAR
   ) = 1
 ),
-wire AS (
-  SELECT *, try_cast(raw->>'ue_pr' AS JSON) AS unstructured,
-         try_cast(raw->>'co' AS JSON) AS contexts
-  FROM parsed
-  WHERE occurred_at < (SELECT observed_until FROM report_params)
-),
 event_data AS (
-  SELECT *, raw->>'uid' AS claimed_user_id, raw->>'duid' AS anonymous_id,
-         raw->>'sid' AS session_id, raw->>'url' AS url, raw->>'refr' AS referrer,
-         unstructured->'data'->>'schema' AS event_schema,
-         unstructured->'data'->'data' AS properties,
-         (SELECT min(try_cast(value->'data'->>'eventIndex' AS BIGINT))
-          FROM json_each(contexts->'data')
-          WHERE starts_with(value->>'schema', 'iglu:com.snowplowanalytics.snowplow/client_session/jsonschema/')) AS event_index
-  FROM wire
+  SELECT *, snowplow_event_index(raw) AS event_index,
+         unnest(snowplow_event_fields(raw, snowplow_custom_event(raw)))
+  FROM eligible
+  WHERE occurred_at < (SELECT observed_until FROM report_params)
 )
 SELECT app_id, event_id, occurred_at, received_at, source, raw,
-       nullif(claimed_user_id, '') AS claimed_user_id, nullif(anonymous_id, '') AS anonymous_id,
-       nullif(session_id, '') AS session_id, event_index, url, referrer, event_schema,
-       CASE WHEN raw->>'e' = 'pv' THEN 'page_view' ELSE split_part(event_schema, '/', 2) END AS event_name,
-       coalesce(properties, '{}'::JSON) AS properties,
+       claimed_user_id, anonymous_id, session_id, event_index, url, referrer, event_schema, event_name, properties,
        utm_value(url, 'utm_source') AS utm_source,
        utm_value(url, 'utm_medium') AS utm_medium,
        utm_value(url, 'utm_campaign') AS utm_campaign,
        utm_value(url, 'utm_content') AS utm_content,
-       utm_value(url, 'utm_term') AS utm_term
+       utm_value(url, 'utm_term') AS utm_term,
+       is_identity_link
 FROM event_data;
 
 CREATE TEMP VIEW events AS
 WITH trusted_links AS (
   SELECT DISTINCT properties->>'anonymous_id' AS anonymous_id, claimed_user_id AS known_user_id
   FROM visible_events
-  WHERE source = 'server'
-    AND event_schema = 'iglu:com.product_analytics/identity_linked/jsonschema/1-0-0'
+  WHERE source = 'server' AND is_identity_link
 ),
 unambiguous_links AS (
   SELECT anonymous_id, min(known_user_id) AS known_user_id FROM trusted_links
@@ -66,7 +60,7 @@ identified AS (
     ON e.anonymous_id = explicit_link.anonymous_id AND e.claimed_user_id = explicit_link.known_user_id
   LEFT JOIN unambiguous_links inferred_link ON inferred_link.anonymous_id = e.anonymous_id
 )
-SELECT * EXCLUDE(verified_user_id, inferred_user_id),
+SELECT * EXCLUDE(verified_user_id, inferred_user_id, is_identity_link),
        coalesce(verified_user_id, inferred_user_id) AS user_id,
        coalesce('u:' || coalesce(verified_user_id, inferred_user_id), 'a:' || anonymous_id) AS user_key,
        local_day(occurred_at) AS activity_day,
@@ -88,13 +82,22 @@ SELECT app_id, session_id,
 FROM events WHERE session_id IS NOT NULL AND is_active
 GROUP BY app_id, session_id;
 
-CREATE TEMP MACRO acquisition_between(period_start, period_end) AS TABLE
-WITH acquisition AS (
-  SELECT coalesce(utm_source, nullif(regexp_extract(referrer, '^https?://([^/:?#]+)', 1), ''), '(direct)') AS source,
+CREATE TEMP MACRO acquisition_sessions_for_periods(period_specs) AS TABLE
+WITH periods AS (
+  SELECT unnest(period_specs, recursive := true)
+),
+acquisition AS (
+  SELECT started_day,
+         coalesce(utm_source, nullif(regexp_extract(referrer, '^https?://([^/:?#]+)', 1), ''), '(direct)') AS source,
          utm_medium, utm_campaign, user_key, page_views
   FROM web_sessions
-  WHERE started_day >= period_start AND started_day < period_end
 )
-SELECT source, utm_medium, utm_campaign, count(*) AS sessions,
+SELECT period_start, period_end, started_day, source, utm_medium, utm_campaign, user_key, page_views
+FROM acquisition
+JOIN periods ON started_day >= period_start AND started_day < period_end;
+
+CREATE TEMP MACRO acquisition_for_periods(period_specs) AS TABLE
+SELECT period_start, period_end, source, utm_medium, utm_campaign, count(*) AS sessions,
        count(DISTINCT user_key) AS users, sum(page_views)::BIGINT AS page_views
-FROM acquisition GROUP BY source, utm_medium, utm_campaign;
+FROM acquisition_sessions_for_periods(period_specs)
+GROUP BY period_start, period_end, source, utm_medium, utm_campaign;

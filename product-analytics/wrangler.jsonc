@@ -3,6 +3,9 @@
   "name": "product-analytics",
   "main": "collector/worker.ts",
   "compatibility_date": "2026-11-27",
+  "ratelimits": [
+    { "name": "BROWSER_RATE_LIMIT", "namespace_id": "217110", "simple": { "limit": 600, "period": 60 } }
+  ],
   "observability": {
     "logs": { "enabled": true, "invocation_logs": false }
   },

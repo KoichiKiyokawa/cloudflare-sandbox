@@ -5,18 +5,39 @@ Cloudflare Worker が Snowplow トラッカーのイベントを受け、R2 に�
 | 役割 | 実装 |
 | --- | --- |
 | プロダクトのフロント | `examples/browser.ts` と Solid v2 の収集デモ。ページ、SPA 遷移、カスタムイベント、実験を送信します。 |
-| 収集と集計 | `collector/` の Worker、Basin Pipelines または R2 直接保存、`analysis/` の DuckDB CLI と SQL。 |
-| ダッシュボード | `dashboard/` の Solid v2 アプリ。日次指標と流入元を表示します。Apache ECharts で DAU・PV・流入元を切り替えられます。期間は直近7日・14日・30日・半年（180日）から選べ、日別 CSV をダウンロードできます。DAU と PV にはそれぞれ目標ラインを設定できます。ローカルでは閲覧をきっかけに DuckDB が集計し、期間ごとに HTTP キャッシュを使います。 |
+| 収集と集計 | `collector/` の Worker、R2 直接保存、`analysis/` の DuckDB CLI と SQL。 |
+| ダッシュボード | `dashboard/` の Solid v2 アプリ。Apache ECharts で DAU・PV の日次推移と、流入元別セッションの日別件数・構成比を表示します。期間は直近7日・14日・30日・半年（180日）から選べ、日別 CSV をダウンロードできます。DAU と PV にはそれぞれ目標ラインを設定できます。Cloudflare Access で認証し、サーバー側の DuckDB が必要に応じて SQL を実行します。サーバーは結果を1時間キャッシュします。 |
 
-## 画面を確認する
+## ローカルで開発する
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm run demo:prepare
-pnpm run dashboard
+pnpm run build:dashboard
 ```
 
-`http://127.0.0.1:5173/` を開いてください。確認項目は [ダッシュボードの確認手順](docs/verify-dashboard.md) にあります。
+1つ目のターミナルで DuckDB のクエリサーバーを起動します。
+
+```sh
+ANALYTICS_DEV=1 ANALYTICS_APP=demo \
+ANALYTICS_SOURCE=local-data/preview/events.parquet \
+ANALYTICS_QUERY_TOKEN=local-dashboard-token-for-loopback-only \
+pnpm run dashboard:query
+```
+
+別のターミナルで `pnpm run dashboard` を実行し、`http://127.0.0.1:5173/` を開きます。ローカル Worker が画面を配信し、本番と同じ経路でクエリサーバーへ転送します。SQL を保存したあとにページを再読み込みするか、「最新の集計を読む」を押すと反映されます。画面のコードを変更した場合は `pnpm run build:dashboard` を再実行します。
+
+### ローカルで認証を確認する
+
+ローカル Worker は `127.0.0.1` に限定し、ブラウザーの Cloudflare Access ログインを省略します。クエリサーバーはローカルでも Worker と共有する Bearer トークンを検証します。上のトークンはローカル設定専用です。
+
+```sh
+pnpm exec node --test tests/dashboard-access.test.ts tests/dashboard-query.test.ts
+```
+
+テストはローカルで署名した JWT を本番 Worker に渡し、認証後に許可された期間のレポートだけが DuckDB に届くことを確認します。Cloudflare Access の実際のログインと許可ポリシーは検証用ホストで確認してください。
+
+[ダッシュボードの確認手順](docs/verify-dashboard.md) · [Cloudflare へのデプロイと Access 設定](docs/deploy.md)
 
 ## 自動テストを実行する
 
@@ -29,11 +50,12 @@ pnpm test
 pnpm run test:e2e --out-dir local-data/sample
 ```
 
-結合テストは、ブラウザーと Node.js の Snowplow トラッカーからローカル Worker に送信し、R2 エミュレーターから取得した原本を DuckDB CLI で Parquet に変換します。再送、重複、ログイン連携、ファネル、実験、ダッシュボードの更新も確認します。結合テストで生成した `local-data/sample/snapshot.json` も、画面の「集計 JSON を開く」から選べます。収集を手動で試す場合は別のターミナルで `pnpm run dev:collector` を起動し、`http://127.0.0.1:5173/collector-demo.html` を開いてください。
+結合テストは、ブラウザーと Node.js の Snowplow トラッカーからローカル Worker に送信し、R2 エミュレーターから取得した原本を DuckDB CLI で Parquet に変換します。再送、重複、ログイン連携、ファネル、実験、ダッシュボードの更新も確認します。結合テストで生成した `local-data/sample/snapshot.json` も、画面の「集計 JSON を開く」から選べます。収集デモは、ダッシュボード用 Worker を停止した状態で `pnpm exec vite --host 127.0.0.1` と `pnpm run dev:collector` を起動し、`http://127.0.0.1:5173/collector-demo.html` を開きます。
 
 ## 導入と分析
 
-- [収集 Worker、R2、Basin のデプロイとダッシュボードの実行](docs/deploy.md)
+- [収集 Worker、R2、ダッシュボードのデプロイ](docs/deploy.md)
+- [業務運用の手順、クラウド負荷計測、監視、復旧](docs/business-operations.md)
 - [新しいアプリの登録、発火条件、Snowplow の送信設定](docs/events.md)
 - [指標の定義と CLI の使用例](docs/metrics.md)
 - [候補の比較、保存設計、月間10万〜1億イベントの費用](docs/design.md)

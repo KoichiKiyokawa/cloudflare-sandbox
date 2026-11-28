@@ -61,9 +61,11 @@ export function decodeBatch(payload: unknown, appId: string, source: EventSource
       }
       const validator = sharedEvents.get(event.data.schema) ?? project.events.get(event.data.schema);
       if (!validator?.validate(event.data.data).valid) throw new Error('unknown schema or invalid event properties');
-      if (event.data.schema === identitySchema && (source !== 'server' || !packet.uid)) {
-        throw new Error('identity_linked requires server authentication and uid');
+      const eventName = event.data.schema.split('/')[1];
+      if (source !== 'server' && (event.data.schema === identitySchema || project.serverOnlyEvents.includes(eventName))) {
+        throw new Error(`${eventName} requires the server endpoint`);
       }
+      if (event.data.schema === identitySchema && !packet.uid) throw new Error('identity_linked requires uid');
     } else if (packet.e !== 'pv' || typeof packet.url !== 'string') {
       throw new Error('expected a page view or a self-describing event');
     }
