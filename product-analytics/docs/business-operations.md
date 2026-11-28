@@ -1,8 +1,30 @@
 # 業務用の公開と運用
 
-## 1. 閲覧と原本の権限を設定する
+## 1. ダッシュボードの閲覧者と原本の権限を管理する
 
-[デプロイ手順](deploy.md) に沿って、業務用ホストを対象に Cloudflare Access を設定してください。社内 IdP の閲覧グループを使い、アプリごとに異なる AUD を設定します。Worker でも署名・発行元・AUD・期限を確認します。公開前に、未ログインの利用者、別アプリへの権限しか持たない利用者、閲覧が許可された利用者で `/` と `/api/dashboard/30` の両方を確認してください。設定漏れや無効なトークンの場合、Worker は HTTP 403 を返します。
+### 初期の閲覧者を設定する
+
+初期の閲覧者は運用者本人の1名です。Cloudflare Zero Trust の **Access controls → Applications** で対象のダッシュボードを開き、アプリ専用のポリシーを **Allow**、ルールを **Include → Emails** に設定します。本人のメールアドレスを1件だけ登録します。個人のメールアドレスは Cloudflare Access の管理画面で管理します。メールアドレスの変更は管理画面で完結します。
+
+メールでログインする場合は、Zero Trust の **Integrations → Identity providers** で **One-time PIN** を追加し、対象アプリのログイン方法として有効にします。ダッシュボードの URL を開き、許可済みのアドレスでコードを要求して、届いたコードを入力します。[メールでログインする手順](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/) · [閲覧を許可するルール](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
+
+最初に本人と未許可の利用者で `/` と `/api/dashboard/30` を確認してください。別の Access アプリを運用している場合は、そのアプリだけに許可された利用者でも両方の URL を確認します。Worker はアプリ固有の AUD と、トークンの署名・発行元・期限を検証します。[Worker の設定手順](deploy.md#ダッシュボードをデプロイする)
+
+### 閲覧者を招待する
+
+1. 対象アプリの **Allow** ポリシーを開き、**Include → Emails** に招待する人のメールアドレスを追加して保存します。
+2. ダッシュボードの URL と、登録したアドレスでログインするよう本人に伝えます。**One-time PIN** を使う場合は、本人がログイン画面からコードを要求します。
+3. 本人にダッシュボードを開き、集計が表示されることを確認してもらいます。
+
+### 閲覧権限を取り消す
+
+1. 対象アプリの **Allow** ポリシーから相手のメールアドレスを削除して保存します。同じアプリに複数の許可ポリシーがある場合は、別のルール経由で相手に閲覧権限が残っていないか確認します。
+2. ログイン済みのセッションを終了するには、対象アプリの **Edit → Revoke existing tokens** を選びます。この操作で、本人を含め、そのダッシュボードにログイン中の全員が再認証を求められます。対象者1人のセッションだけを終了したい場合は **Team & Resources → Users** で対象者を選び、**Action → Revoke → Revoke sessions** を実行します。この操作は、その人が同じ Cloudflare アカウント内で使っている他の Access アプリのセッションにも及びます。
+3. 対象者のセッションから `/` と `/api/dashboard/30` を再取得して閲覧が拒否されることと、残した利用者がログインできることを確認します。
+
+失効の対象は以後のリクエストです。すでにダウンロードした CSV や JSON は閲覧者の端末に残ります。[Cloudflare Access のセッション失効](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/#revoke-user-sessions)
+
+### R2 原本の権限を管理する
 
 運用者や閲覧範囲が異なるプロジェクトには、R2 バケット、読み取り専用キー、ダッシュボードと Access アプリを分けてください。クエリサーバーは `ANALYTICS_APP` で集計対象を絞り込みます。読み取りキーには原本を保存するバケットだけを許可します。Worker からクエリサーバーにアクセスするトークンは別の値を使います。
 
