@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iglu:com.product_analytics/identity_linked/jsonschema/1-0-0",
+  "type": "object",
+  "required": ["anonymous_id"],
+  "properties": { "anonymous_id": { "type": "string", "format": "uuid" } },
+  "additionalProperties": false
+}
