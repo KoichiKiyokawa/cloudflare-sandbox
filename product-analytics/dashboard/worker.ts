@@ -13,7 +13,7 @@ export async function serveDashboardRequest(authorized: Request, env: Omit<Dashb
   const url = new URL(authorized.url);
   const period = dashboardReportPeriod(url.pathname);
   if (period === undefined) {
-    if (url.pathname === '/api' || url.pathname.startsWith('/api/') || url.pathname === '/snapshot.json') {
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       return new Response(null, { status: 404, headers: { 'Cache-Control': 'private, no-store' } });
     }
     return env.ASSETS.fetch(authorized);

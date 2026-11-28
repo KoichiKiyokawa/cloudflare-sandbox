@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { parseArgs, promisify } from 'node:util';
+import { parseArgs } from 'node:util';
+import { pack } from '../analysis/database.ts';
 import { decodeBatch, snowplowPayloadSchema } from '../collector/protocol.ts';
 
 const { values } = parseArgs({ options: { 'include-late': { type: 'boolean' } } });
-const run = promisify(execFile);
 const dayMs = 86_400_000;
 const last = Date.parse('2026-11-26T02:00:00Z');
 const sampleDays = 195;
@@ -49,12 +48,8 @@ const late = decodeBatch({
 
 const raw = 'local-data/preview/events.ndjson';
 const parquet = 'local-data/preview/events.parquet';
-const output = 'dashboard/public/snapshot.json';
 await mkdir('local-data/preview', { recursive: true });
-await writeFile(raw, [...days.flat(), ...late].map((event) => JSON.stringify(event)).join('\n') + '\n');
-await run(process.execPath, ['analysis/cli.ts', 'pack', '--source', raw, '--output', parquet]);
-await run(process.execPath, ['analysis/cli.ts', 'snapshot', '--source', parquet, '--app', 'demo', '--last-days', '180',
-  '--tz', 'Asia/Tokyo', '--observed-until', '2026-11-26T15:00:00Z',
-  '--known-at', values['include-late'] ? '2026-11-27T02:00:00Z' : '2026-11-27T00:00:00Z',
-  '--output', output]);
-console.info(`Wrote ${output} (${values['include-late'] ? 'includes 5 late events' : 'before 5 late events arrived'}).`);
+const events = values['include-late'] ? [...days.flat(), ...late] : days.flat();
+await writeFile(raw, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+await pack([raw], parquet);
+console.info(`Wrote ${parquet} with ${events.length} sample events.`);

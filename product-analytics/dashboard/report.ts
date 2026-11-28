@@ -24,7 +24,7 @@ export interface Period {
   dailySources?: { day: string; sessionsBySource: number[]; otherSessions: number }[];
 }
 
-export interface Snapshot {
+export interface DashboardReport {
   app: string;
   from: string;
   to: string;
@@ -68,7 +68,7 @@ function sources(value: unknown): TrafficSource[] {
   });
 }
 
-export function parseSnapshot(value: unknown): Snapshot {
+export function parseDashboardReport(value: unknown): DashboardReport {
   const data = object(value);
   if (data.version !== 1 || !Array.isArray(data.daily)) throw new Error('対応する集計ファイルを選択してください。');
 

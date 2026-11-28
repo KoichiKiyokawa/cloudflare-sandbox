@@ -6,5 +6,4 @@ dist/
 .env*
 local-data/
 wrangler.production.jsonc
-dashboard/public/snapshot.json
 wrangler.dashboard.generated.json

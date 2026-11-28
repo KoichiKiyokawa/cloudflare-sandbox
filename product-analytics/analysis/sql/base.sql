@@ -82,22 +82,8 @@ SELECT app_id, session_id,
 FROM events WHERE session_id IS NOT NULL AND is_active
 GROUP BY app_id, session_id;
 
-CREATE TEMP MACRO acquisition_sessions_for_periods(period_specs) AS TABLE
-WITH periods AS (
-  SELECT unnest(period_specs, recursive := true)
-),
-acquisition AS (
-  SELECT started_day,
-         coalesce(utm_source, nullif(regexp_extract(referrer, '^https?://([^/:?#]+)', 1), ''), '(direct)') AS source,
-         utm_medium, utm_campaign, user_key, page_views
-  FROM web_sessions
-)
-SELECT period_start, period_end, started_day, source, utm_medium, utm_campaign, user_key, page_views
-FROM acquisition
-JOIN periods ON started_day >= period_start AND started_day < period_end;
-
-CREATE TEMP MACRO acquisition_for_periods(period_specs) AS TABLE
-SELECT period_start, period_end, source, utm_medium, utm_campaign, count(*) AS sessions,
-       count(DISTINCT user_key) AS users, sum(page_views)::BIGINT AS page_views
-FROM acquisition_sessions_for_periods(period_specs)
-GROUP BY period_start, period_end, source, utm_medium, utm_campaign;
+CREATE TEMP VIEW acquisition_sessions AS
+SELECT started_day,
+       coalesce(utm_source, nullif(regexp_extract(referrer, '^https?://([^/:?#]+)', 1), ''), '(direct)') AS source,
+       utm_medium, utm_campaign, user_key, page_views
+FROM web_sessions;

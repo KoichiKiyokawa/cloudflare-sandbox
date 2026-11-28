@@ -1,7 +1,6 @@
-WITH periods AS (
-  SELECT list(struct_pack(period_start := start_date, period_end := end_date)) AS specs
-  FROM report_params
-)
-SELECT a.* EXCLUDE (period_start, period_end)
-FROM periods p, LATERAL acquisition_for_periods(p.specs) a
+SELECT source, utm_medium, utm_campaign, count(*) AS sessions,
+       count(DISTINCT user_key) AS users, sum(page_views)::BIGINT AS page_views
+FROM acquisition_sessions, report_params
+WHERE started_day >= start_date AND started_day < end_date
+GROUP BY source, utm_medium, utm_campaign
 ORDER BY sessions DESC, source, utm_medium, utm_campaign;

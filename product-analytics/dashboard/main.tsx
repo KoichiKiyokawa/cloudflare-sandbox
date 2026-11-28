@@ -1,6 +1,6 @@
 import { createMemo, createSignal, For, lazy, Loading, onCleanup, Show } from 'solid-js';
 import { render } from '@solidjs/web';
-import { parseSnapshot, type Snapshot } from './snapshot.ts';
+import { parseDashboardReport, type DashboardReport } from './report.ts';
 import { cacheRemainingHeader, dashboardPeriods, dashboardReportPath, type DashboardPeriod } from './query-endpoint.ts';
 import './style.css';
 
@@ -12,7 +12,7 @@ const staleAfterMs = 30 * 60 * 60_000;
 const pollIntervalMs = 5 * 60_000;
 const initialPeriod: DashboardPeriod = 30;
 
-function Summary(props: { data: Snapshot; days: DashboardPeriod; fileMode: boolean; selectDays: (days: DashboardPeriod) => void }) {
+function Summary(props: { data: DashboardReport; days: DashboardPeriod; fileMode: boolean; selectDays: (days: DashboardPeriod) => void }) {
   const period = createMemo(() => props.data.periods.find((item) => item.days === props.days) ?? props.data.periods[0]);
   const choices = createMemo(() => props.fileMode
     ? dashboardPeriods.filter((days) => props.data.periods.some((item) => item.days === days))
@@ -66,18 +66,18 @@ function Summary(props: { data: Snapshot; days: DashboardPeriod; fileMode: boole
 }
 
 function Dashboard() {
-  const [snapshot, setSnapshot] = createSignal<Snapshot>();
+  const [currentReport, setReport] = createSignal<DashboardReport>();
   const [status, setStatus] = createSignal('');
   const [fileMode, setFileMode] = createSignal(false);
   const [days, setDays] = createSignal<DashboardPeriod>(initialPeriod);
   const [now, setNow] = createSignal(Date.now());
   const stale = createMemo(() => {
-    const saved = snapshot();
+    const saved = currentReport();
     return !!saved && !fileMode() && now() - Date.parse(saved.knownAt) >= staleAfterMs;
   });
   let requestNumber = 0;
   let usingFile = false;
-  let hasSnapshot = false;
+  let hasReport = false;
   let refreshTimer: number | undefined;
 
   async function refresh(period = days()) {
@@ -89,17 +89,17 @@ function Dashboard() {
       if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
         throw new Error('集計 JSON を取得できませんでした。');
       }
-      const data = parseSnapshot(await response.json());
+      const data = parseDashboardReport(await response.json());
       if (current !== requestNumber) return;
       const remaining = Number(response.headers.get(cacheRemainingHeader));
       if (Number.isSafeInteger(remaining) && remaining > 0 && remaining <= 2_147_483_647) nextCheck = remaining;
-      hasSnapshot = true;
+      hasReport = true;
       setFileMode(false);
-      setSnapshot(data);
+      setReport(data);
       setStatus('');
     } catch (error) {
       if (current !== requestNumber) return;
-      setStatus(hasSnapshot ? '最新の集計を取得できなかったため、前回の集計を表示しています。'
+      setStatus(hasReport ? '最新の集計を取得できなかったため、前回の集計を表示しています。'
         : error instanceof Error ? error.message : '集計 JSON を取得できませんでした。');
     } finally {
       if (current === requestNumber && !usingFile) {
@@ -117,15 +117,15 @@ function Dashboard() {
     usingFile = true;
     window.clearTimeout(refreshTimer);
     try {
-      const data = parseSnapshot(JSON.parse(await file.text()));
+      const data = parseDashboardReport(JSON.parse(await file.text()));
       if (current !== requestNumber) return;
       if (!data.periods.some((period) => period.days === days())) {
         const available = dashboardPeriods.find((days) => data.periods.some((period) => period.days === days));
         if (available !== undefined) setDays(available);
       }
-      hasSnapshot = true;
+      hasReport = true;
       setFileMode(true);
-      setSnapshot(data);
+      setReport(data);
       setStatus('');
     } catch (error) {
       if (current !== requestNumber) return;
@@ -153,10 +153,10 @@ function Dashboard() {
       <Show when={stale()}>
         <p class="stale-warning" role="status">最終集計から30時間以上経過しています。</p>
       </Show>
-      <Show when={snapshot()} fallback={
+      <Show when={currentReport()} fallback={
         <div class="empty">
           <h2>集計結果を読み込む</h2>
-          <p>DuckDB CLI の <code>snapshot</code> コマンドで生成した JSON を選択してください。ファイルはブラウザー内で読み込みます。</p>
+          <p>「最新の集計を読む」を押すか、保存済みの集計 JSON を選択してください。</p>
         </div>
     }>{(data) => <Summary data={data()} days={days()} fileMode={fileMode()} selectDays={(period) => {
       setDays(period);

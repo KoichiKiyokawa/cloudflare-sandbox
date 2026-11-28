@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { cacheRemainingHeader } from '../dashboard/query-endpoint.ts';
-import { parseSnapshot } from '../dashboard/snapshot.ts';
+import { parseDashboardReport } from '../dashboard/report.ts';
 import dashboard from '../dashboard/worker.ts';
 import { createQueryServer } from '../ops/query-server.ts';
 import { fixture } from './fixture.ts';
@@ -44,7 +44,10 @@ test('Access gates the fixed DuckDB query and concurrent requests share a one-ho
     .setIssuer(issuer).setAudience(audience).setExpirationTime('5m').sign(privateKey);
   const config = {
     ACCESS_TEAM: issuer, ACCESS_AUDIENCE: audience, ANALYTICS_QUERY_URL: upstream, ANALYTICS_QUERY_TOKEN: token,
-    ASSETS: { fetch: async () => new Response('dashboard template') },
+    ASSETS: {
+      fetch: async (request: Request) => new URL(request.url).pathname === '/'
+        ? new Response('dashboard template') : new Response(null, { status: 404 }),
+    },
   };
   let forwarded = 0;
   let redirect = false;
@@ -71,24 +74,24 @@ test('Access gates the fixed DuckDB query and concurrent requests share a one-ho
   assert.equal((await request('/api/dashboard/30', false)).status, 403);
   assert.equal((await request('/api/dashboard/30?sql=SELECT%201')).status, 400);
   assert.equal((await request('/api/dashboard/30', true, 'POST')).status, 405);
-  for (const path of ['/snapshot.json', '/api/query', '/api/dashboard/31', '/api/dashboard/030']) {
+  for (const path of ['/api/query', '/api/dashboard/31', '/api/dashboard/030', '/unknown']) {
     assert.equal((await request(path)).status, 404);
   }
   assert.equal((await request('/api/dashboard/30?from=2025-01-01')).status, 400);
   assert.equal(forwarded, 0);
 
-  const snapshots = await Promise.all(Array.from({ length: 4 }, async () => {
+  const reports = await Promise.all(Array.from({ length: 4 }, async () => {
     const response = await request('/api/dashboard/30');
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
     assert.equal(response.headers.get(cacheRemainingHeader), '3600000');
-    return parseSnapshot(await response.json());
+    return parseDashboardReport(await response.json());
   }));
   assert.equal(executions.mock.callCount(), 1);
-  assert.deepEqual(snapshots[0].daily.at(-3), {
+  assert.deepEqual(reports[0].daily.at(-3), {
     day: '2026-01-02', dau: 2, wau: 2, mau: 2, page_views: 3, page_users: 2,
   });
-  assert.ok(snapshots.every((snapshot) => snapshot.knownAt === new Date(before).toISOString()));
+  assert.ok(reports.every((report) => report.knownAt === new Date(before).toISOString()));
 
   now = before + 3_599_999;
   const almostExpired = await request('/api/dashboard/30', true, 'HEAD');
@@ -96,13 +99,13 @@ test('Access gates the fixed DuckDB query and concurrent requests share a one-ho
   assert.equal(await almostExpired.text(), '');
   assert.equal(executions.mock.callCount(), 1);
   now += 1;
-  assert.equal(parseSnapshot(await (await request('/api/dashboard/30')).json()).knownAt, new Date(now).toISOString());
+  assert.equal(parseDashboardReport(await (await request('/api/dashboard/30')).json()).knownAt, new Date(now).toISOString());
   assert.equal(executions.mock.callCount(), 2);
-  const lastWeek = parseSnapshot(await (await request('/api/dashboard/7')).json());
+  const lastWeek = parseDashboardReport(await (await request('/api/dashboard/7')).json());
   assert.equal(lastWeek.daily.length, 7);
   assert.deepEqual(lastWeek.periods.map((period) => period.days), [7]);
   assert.equal(executions.mock.callCount(), 3);
-  assert.equal(parseSnapshot(await (await request('/api/dashboard/30')).json()).daily.length, 30);
+  assert.equal(parseDashboardReport(await (await request('/api/dashboard/30')).json()).daily.length, 30);
   assert.equal(executions.mock.callCount(), 3);
   redirect = true;
   const response = await request('/api/dashboard/30');

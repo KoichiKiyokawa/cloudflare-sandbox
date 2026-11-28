@@ -21,8 +21,11 @@ AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_K
 aws --region auto --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
   s3 sync s3://product-analytics-raw/raw/v1/ local-data/raw
 
-pnpm run analytics pack --source 'local-data/raw/2026-11-27/*/*.ndjson.gz' \
-  --output local-data/parquet/2026-11-27.parquet
+pnpm exec node --input-type=module <<'JS'
+import { pack } from './analysis/database.ts';
+
+await pack(['local-data/raw/2026-11-27/*/*.ndjson.gz'], 'local-data/parquet/2026-11-27.parquet');
+JS
 ```
 
 `pack` では元の受信日と同じ出力ファイルを使うと、受信日の途中で実行しても後から全件を再作成できます。同じ受信日をまとめるときは、その受信日の全アプリを入力に含めてください。空の受信日はスキップしてください。ローカルファイルにもバケットと同じデータ保持方針を適用してください。
@@ -41,13 +44,7 @@ pnpm exec wrangler r2 bucket lifecycle add product-analytics-raw expire-events r
 
 R2 バケットを限定した読み取り専用の S3 API キーを発行し、`R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` を環境変数として渡します。DuckDB は初回に `httpfs` 拡張を取得するため、拡張配信元に接続できる環境が必要です。クエリの試行回数が多い場合はローカルの Parquet を使うと、R2 の読み取りを抑えられます。
 
-```sh
-pnpm run analytics active \
-  --source 'r2://product-analytics-raw/raw/v1/**/*.ndjson.gz' \
-  --app demo --from 2026-11-01 --to 2026-11-27
-```
-
-受信日ごとにまとめた Parquet を使う場合は、そのパスまたは R2 グロブを指定できます。移行中は `--source` を複数指定し、旧形式と新形式を同じレポートで扱えます。各グロブには最低1ファイルが必要です。R2 の一覧と読み取りができる資格情報を使います。探索 SQL は端末上で実行するため、信頼する SQL ファイルを渡してください。
+クエリサーバーの `ANALYTICS_SOURCE` や端末から分析する際の `openAnalysis()` に、`r2://product-analytics-raw/raw/v1/**/*.ndjson.gz` のようなグロブを指定します。Parquet も指定できます。`openAnalysis()` に複数のパスを渡すと、パスごとの形式を一緒に扱えます。各グロブには最低1ファイルが必要です。R2 の一覧と読み取りができる資格情報を使います。端末から SQL を実行する例は [指標の定義](metrics.md#実行例) を参照してください。
 
 [R2 S3 API](https://developers.cloudflare.com/r2/api/s3/)、[DuckDB の R2 対応](https://duckdb.org/docs/stable/core_extensions/httpfs/s3api.html)。
 

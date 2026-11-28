@@ -7,7 +7,7 @@ const issuer = 'https://analytics-example.cloudflareaccess.com';
 const audience = 'a'.repeat(64);
 const url = 'https://analytics.example.test';
 
-test('protects HTML and snapshot with the configured issuer, audience and signing keys', async (t) => {
+test('protects HTML and the dashboard API with the configured issuer, audience and signing keys', async (t) => {
   const { publicKey, privateKey } = await generateKeyPair('RS256', { extractable: true });
   const key = { ...await exportJWK(publicKey), kid: 'access-test', alg: 'RS256' };
   const assetPaths: string[] = [];

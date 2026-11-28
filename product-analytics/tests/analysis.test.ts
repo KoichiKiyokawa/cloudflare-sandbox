@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { dashboardSnapshot, openAnalysis, report } from '../analysis/database.ts';
+import { dashboardReport, openAnalysis, report } from '../analysis/database.ts';
 import { fixture, reportOptions } from './fixture.ts';
 
 test('identity, timezone, late delivery, ordered funnels, retention and exposure share definitions', async (t) => {
@@ -90,18 +90,22 @@ test('dashboard acquisition counts unique users independently for each selectabl
     payload_json: JSON.stringify({ ...JSON.parse(landing.payload_json), sid: 'earlier-session' }),
   };
   await writeFile(source, [...fixture, earlierSession].map((row) => JSON.stringify(row)).join('\n'));
-  const options = { ...reportOptions, from: '2025-12-15' };
-  const db = await openAnalysis([source], options);
-  t.after(() => db.close());
-
-  const snapshot = await dashboardSnapshot(db, options);
-  assert.deepEqual(snapshot.periods.map(({ days, from, to }) => [days, from, to]), [
-    [21, '2025-12-15', '2026-01-05'], [14, '2025-12-22', '2026-01-05'], [7, '2025-12-29', '2026-01-05'],
-  ]);
-  assert.deepEqual(snapshot.periods.map(({ sources }) => {
-    const mail = sources.find(({ source }) => source === 'mail & news');
-    return [mail?.sessions, mail?.users];
-  }), [['2', '1'], ['1', '1'], ['1', '1']]);
+  for (const [from, expectedDays, expectedSessions] of [
+    ['2025-12-15', 21, '2'], ['2025-12-22', 14, '1'], ['2025-12-29', 7, '1'],
+  ] as const) {
+    const options = { ...reportOptions, from };
+    const db = await openAnalysis([source], options);
+    try {
+      const { periods } = await dashboardReport(db, options);
+      assert.equal(periods.length, 1);
+      const [period] = periods;
+      assert.deepEqual([period.days, period.from, period.to], [expectedDays, from, '2026-01-05']);
+      const mail = period.sources.find(({ source }) => source === 'mail & news');
+      assert.deepEqual([mail?.sessions, mail?.users], [expectedSessions, '1']);
+    } finally {
+      db.close();
+    }
+  }
 });
 
 test('daily acquisition counts each session, including sources outside the top eight', async (t) => {
@@ -119,7 +123,7 @@ test('daily acquisition counts each session, including sources outside the top e
   await writeFile(source, records.map((row) => JSON.stringify(row)).join('\n'));
   const db = await openAnalysis([source], reportOptions);
   t.after(() => db.close());
-  const [period] = (await dashboardSnapshot(db, reportOptions)).periods;
+  const [period] = (await dashboardReport(db, reportOptions)).periods;
   assert.deepEqual(period.sources.map((row) => row.source), records.slice(0, 8).map((row) => row.event_id));
   assert.deepEqual(period.dailySources, [
     { day: '2026-01-02', sessionsBySource: Array(8).fill('1'), otherSessions: '1' },

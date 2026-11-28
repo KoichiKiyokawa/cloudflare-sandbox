@@ -3,7 +3,7 @@ import { init, use, type ComposeOption, type EChartsType } from 'echarts/core';
 import { BarChart, LineChart, type BarSeriesOption, type LineSeriesOption } from 'echarts/charts';
 import { GridComponent, MarkLineComponent, TooltipComponent, type GridComponentOption, type TooltipComponentOption } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import type { Period, Snapshot } from './snapshot.ts';
+import type { DashboardReport, Period } from './report.ts';
 
 use([BarChart, LineChart, GridComponent, MarkLineComponent, TooltipComponent, CanvasRenderer]);
 
@@ -136,7 +136,7 @@ function ChartCanvas(props: { options: ChartOptions; label: string; description?
     aria-description={props.description} style={{ height: props.height }} />;
 }
 
-export default function AnalyticsChart(props: { app: string; daily: Snapshot['daily']; period: Period }) {
+export default function AnalyticsChart(props: { app: string; daily: DashboardReport['daily']; period: Period }) {
   const [metric, setMetric] = createSignal<Metric>('dau');
   const [goals, setGoals] = createSignal(new Map<string, number | null>());
   const goalKey = createMemo(() => `product-analytics:goal:${props.app}:${metric()}`);

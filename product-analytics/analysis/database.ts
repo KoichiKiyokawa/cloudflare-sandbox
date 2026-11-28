@@ -4,8 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { serverOnlyEventNames } from '../events/projects.ts';
 
-export const reports = ['active', 'funnel', 'retention', 'history', 'sessions', 'acquisition', 'segment', 'experiment'] as const;
-export type ReportName = typeof reports[number];
+export type ReportName = 'active' | 'funnel' | 'retention' | 'history' | 'sessions' | 'acquisition' | 'segment' | 'experiment';
 export interface ReportOptions {
   app: string;
   from: string;
@@ -32,16 +31,17 @@ const sqlFile = (name: string) => readFile(new URL(`./sql/${name}.sql`, import.m
 const literal = (value: string) => "'" + value.replaceAll("'", "''") + "'";
 const pathList = (paths: string[]) => '[' + paths.map(literal).join(', ') + ']';
 
-export function rollingReportDates(observedUntil: string, days: number, calendar: Intl.DateTimeFormat) {
+export function rollingReportDates(observedUntil: string, days: number, timeZone: string) {
+  const calendar = new Intl.DateTimeFormat('en', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
   const parts = new Map(calendar.formatToParts(new Date(observedUntil)).map((part) => [part.type, part.value]));
   const to = `${parts.get('year')}-${parts.get('month')}-${parts.get('day')}`;
   const from = new Date(Date.parse(to) - days * 86_400_000).toISOString().slice(0, 10);
   return { from, to };
 }
 
-async function openStorage(paths: string[], profile = false, signal?: AbortSignal) {
+async function openStorage(paths: string[], signal?: AbortSignal) {
   signal?.throwIfAborted();
-  if (!paths.length) throw new Error('Specify --source with a Parquet or NDJSON path');
+  if (!paths.length) throw new Error('Specify a Parquet or NDJSON path');
   const remote = paths.some((path) => path.startsWith('r2://'));
   const other = paths.find((path) => /^[a-z]+:\/\//i.test(path) && !path.startsWith('r2://'));
   if (other) throw new Error('Use a local path or r2://');
@@ -77,7 +77,6 @@ async function openStorage(paths: string[], profile = false, signal?: AbortSigna
       } catch {
         throw new Error('Could not configure the DuckDB R2 secret');
       }
-      if (profile) await connection.run(`SET redact_http_logs = true; CALL enable_logging('HTTP', storage = 'memory');`);
     }
     const sources = [];
     if (parquet.length) sources.push(`SELECT ${columnNames} FROM read_parquet(${pathList(parquet)}, union_by_name=true, hive_partitioning=false)`);
@@ -102,8 +101,8 @@ async function openStorage(paths: string[], profile = false, signal?: AbortSigna
   }
 }
 
-export async function openAnalysis(paths: string[], options: ReportOptions, profile = false, signal?: AbortSignal) {
-  const db = await openStorage(paths, profile, signal);
+export async function openAnalysis(paths: string[], options: ReportOptions, signal?: AbortSignal) {
+  const db = await openStorage(paths, signal);
   try {
     signal?.throwIfAborted();
     await db.connection.run(`CREATE TEMP TABLE report_params AS SELECT
@@ -132,9 +131,9 @@ export async function openAnalysis(paths: string[], options: ReportOptions, prof
 
 type AnalysisDatabase = Awaited<ReturnType<typeof openAnalysis>>;
 
-export async function query(db: AnalysisDatabase, sql: string, values?: string[]) {
+export async function query(db: AnalysisDatabase, sql: string) {
   db.signal?.throwIfAborted();
-  const result = await db.connection.runAndReadAll(sql, values);
+  const result = await db.connection.runAndReadAll(sql);
   try {
     return result.getRowObjectsJson();
   } finally {
@@ -146,39 +145,30 @@ export async function report(db: AnalysisDatabase, name: ReportName) {
   return query(db, await sqlFile(name));
 }
 
-export async function dashboardSnapshot(db: AnalysisDatabase, options: ReportOptions, singlePeriod = false) {
+export async function dashboardReport(db: AnalysisDatabase, options: ReportOptions) {
   const daily = await report(db, 'active');
+  const firstDay = daily[0]?.day;
   const lastDay = daily.at(-1)?.day;
-  const ranges = [];
-  if (typeof lastDay === 'string') {
+  const periods = [];
+  if (typeof firstDay === 'string' && typeof lastDay === 'string') {
     const to = new Date(Date.parse(lastDay) + 86_400_000).toISOString().slice(0, 10);
-    const lengths = singlePeriod ? [daily.length] : [daily.length, ...[180, 30, 14, 7].filter((days) => days < daily.length)];
-    for (const days of lengths) {
-      const from = daily.at(-days)?.day;
-      if (typeof from !== 'string') throw new Error('Missing snapshot period start');
-      ranges.push({ days, from, to });
-    }
-  }
-  const specs = ranges.map(({ from, to }) => ({ period_start: from, period_end: to }));
-  const acquisitions = specs.length === 0 ? []
-    : await query(db, await sqlFile('dashboard-acquisition'), [JSON.stringify(specs)]);
-  const periods = ranges.map((range) => {
-    const rows = acquisitions.filter((item) => item.period_start === range.from && item.period_end === range.to);
+    const days = daily.length;
+    const rows = await query(db, await sqlFile('dashboard-acquisition'));
     const sources = rows.filter((item) => item.day === null)
       .map(({ source, utm_medium, utm_campaign, sessions, users, page_views }) => ({ source, utm_medium, utm_campaign, sessions, users, page_views }));
-    const dailySources = daily.slice(-range.days).map(({ day }) => ({
+    const dailySources = daily.map(({ day }) => ({
       day, sessionsBySource: sources.map(() => '0'), otherSessions: '0',
     }));
-    const days = new Map(dailySources.map((row) => [row.day, row]));
+    const dailySourceByDay = new Map(dailySources.map((row) => [row.day, row]));
     for (const row of rows) {
       if (row.day === null) continue;
-      const point = days.get(row.day);
+      const point = dailySourceByDay.get(row.day);
       if (!point) throw new Error('Acquisition day outside the selected period');
       if (row.source_rank === null) point.otherSessions = String(row.sessions);
       else point.sessionsBySource[Number(row.source_rank) - 1] = String(row.sessions);
     }
-    return { ...range, sources, dailySources };
-  });
+    periods.push({ days, from: firstDay, to, sources, dailySources });
+  }
   const [receipt] = await query(db, `
     SELECT strftime(max(received_at), '%Y-%m-%dT%H:%M:%S.%gZ') AS latest FROM visible_events
   `);
@@ -189,7 +179,7 @@ export async function dashboardSnapshot(db: AnalysisDatabase, options: ReportOpt
 }
 
 export async function pack(paths: string[], destination: string) {
-  if (!destination.toLowerCase().endsWith('.parquet')) throw new Error('--output must be a local .parquet file');
+  if (!destination.toLowerCase().endsWith('.parquet')) throw new Error('The destination must be a local .parquet file');
   const output = resolve(destination);
   const temp = `${output}.${randomUUID()}.tmp`;
   await mkdir(dirname(output), { recursive: true });

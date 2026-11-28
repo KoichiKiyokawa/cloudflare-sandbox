@@ -5,27 +5,24 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { parseArgs, promisify } from 'node:util';
+import { promisify } from 'node:util';
 import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
+import { openAnalysis, pack, query, report } from '../analysis/database.ts';
 import { sendServerEvents } from '../examples/server.ts';
 import { cacheRemainingHeader, dashboardReportPeriod } from '../dashboard/query-endpoint.ts';
+import { runDashboardQuery } from '../ops/dashboard-query.ts';
 import identitySchema from '../events/identity_linked.json' with { type: 'json' };
 
 const run = promisify(execFile);
-const { values } = parseArgs({ options: { 'out-dir': { type: 'string' }, 'reuse-dashboard': { type: 'boolean' } } });
 const temporary = await mkdtemp(join(tmpdir(), 'product-analytics-e2e-'));
-const output = values['out-dir'] ? resolve(values['out-dir']) : temporary;
 const rawDirectory = join(temporary, 'r2');
-const packed = join(output, 'events.parquet');
-const snapshot = join(output, 'snapshot.json');
-const sqlFile = join(temporary, 'query.sql');
-const initialSnapshot = join(temporary, 'initial-snapshot.json');
+const packed = join(temporary, 'events.parquet');
+const savedReport = join(temporary, 'dashboard-report.json');
 const token = 'demo-local-token-for-integration-only';
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js');
 await mkdir(rawDirectory, { recursive: true });
-await mkdir(output, { recursive: true });
 
 let worker: Miniflare | undefined;
 let vite: ViteDevServer | undefined;
@@ -48,12 +45,8 @@ try {
     method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: 'x'.repeat(256 * 1024 + 1),
   })).status, 413);
 
-  if (values['reuse-dashboard']) {
-    assert.equal((await fetch('http://127.0.0.1:5173/collector-demo.html')).status, 200);
-  } else {
-    vite = await createServer({ server: { host: '127.0.0.1', port: 5173, strictPort: true } });
-    await vite.listen();
-  }
+  vite = await createServer({ server: { host: '127.0.0.1', port: 5173, strictPort: true } });
+  await vite.listen();
   browser = await chromium.launch(process.env.CHROME_BIN
     ? { executablePath: process.env.CHROME_BIN } : { channel: 'chrome' });
   const page = await browser.newPage();
@@ -125,42 +118,40 @@ try {
   }
 
   const source = join(rawDirectory, '*.ndjson.gz');
-  const cli = async (...args: string[]) => (await run(process.execPath, ['analysis/cli.ts', ...args])).stdout;
-  await cli('pack', '--source', source, '--output', packed);
+  await pack([source], packed);
   assert.equal((await readFile(packed)).subarray(0, 4).toString(), 'PAR1');
   const from = new Date(Number(retryBatch[0].dtm)).toISOString().slice(0, 10);
   const to = new Date(Date.parse(from) + 86_400_000).toISOString().slice(0, 10);
-  const params = ['--source', packed, '--app', 'demo', '--from', from, '--to', to,
-    '--tz', 'UTC', '--observed-until', `${to}T00:00:00Z`];
-  const active = JSON.parse(await cli('active', ...params));
-  assert.deepEqual(active, [{ day: from, dau: '1', wau: '1', mau: '1', page_views: '2', page_users: '1' }]);
-  const funnel = JSON.parse(await cli('funnel', ...params, '--step', 'page_view', '--step', 'pricing_opened', '--step', 'purchase_completed'));
-  assert.deepEqual(funnel.map((step: { users: string }) => step.users), ['1', '1', '1']);
-  const group = JSON.parse(await cli('experiment', ...params, '--experiment', 'layout', '--conversion', 'purchase_completed'));
-  assert.equal(group[0].conversion_rate, 1);
-  await writeFile(sqlFile, 'SELECT count(*) AS events, count(DISTINCT user_key) AS users FROM events;\n');
-  assert.deepEqual(JSON.parse(await cli('query', ...params, '--sql-file', sqlFile)), [{ events: '7', users: '1' }]);
-  const rollingParams = ['--source', packed, '--app', 'demo', '--last-days', '180',
-    '--tz', 'UTC', '--observed-until', `${to}T00:00:00Z`];
-  await cli('snapshot', ...rollingParams, '--output', snapshot);
-  await cli('snapshot', ...rollingParams, '--known-at', '2020-01-01T00:00:00Z', '--output', initialSnapshot);
-  const original = await readFile(initialSnapshot, 'utf8');
-  await assert.rejects(cli('snapshot', ...rollingParams, '--known-at', '2020-01-01T00:00:00Z',
-    '--max-ingest-lag-hours', '30', '--output', initialSnapshot), /latest eligible receipt/);
-  assert.equal(await readFile(initialSnapshot, 'utf8'), original);
+  const reportConfig = { app: 'demo', source: packed, timeZone: 'UTC' };
+  const times = { observedUntil: `${to}T00:00:00Z`, knownAt: new Date().toISOString() };
+  const db = await openAnalysis([packed], {
+    app: reportConfig.app, timeZone: reportConfig.timeZone, from, to, ...times,
+    steps: ['page_view', 'pricing_opened', 'purchase_completed'], experiment: 'layout', conversion: 'purchase_completed',
+  });
+  try {
+    assert.deepEqual(await report(db, 'active'), [{ day: from, dau: '1', wau: '1', mau: '1', page_views: '2', page_users: '1' }]);
+    assert.deepEqual((await report(db, 'funnel')).map((step) => step.users), ['1', '1', '1']);
+    assert.equal((await report(db, 'experiment'))[0].conversion_rate, 1);
+    assert.deepEqual(await query(db, 'SELECT count(*) AS events, count(DISTINCT user_key) AS users FROM events'),
+      [{ events: '7', users: '1' }]);
+  } finally {
+    db.close();
+  }
+  const staleTimes = { ...times, knownAt: '2020-01-01T00:00:00Z' };
+  await assert.rejects(runDashboardQuery({ ...reportConfig, maxIngestLagHours: 30 }, 30, staleTimes), /Latest eligible receipt/);
   const rangeStart = (days: number) => new Date(Date.parse(to) - days * 86_400_000).toISOString().slice(0, 10);
-  assert.equal(JSON.parse(await readFile(snapshot, 'utf8')).from, rangeStart(180));
 
-  let publishedSnapshot = initialSnapshot;
+  let reportsAreCurrent = false;
   let rejectRefresh = false;
+  let receivedReport: string | undefined;
   await page.route('http://127.0.0.1:5173/api/dashboard/*', async (route) => {
     if (rejectRefresh) return route.fulfill({ status: 503 });
     const days = dashboardReportPeriod(new URL(route.request().url()).pathname);
-    const full = JSON.parse(await readFile(publishedSnapshot, 'utf8'));
-    const period = full.periods.find((item: { days: number }) => item.days === days);
-    assert.ok(period);
+    assert.ok(days);
+    const body = await runDashboardQuery(reportConfig, days, reportsAreCurrent ? times : staleTimes);
+    if (reportsAreCurrent && days === 30) receivedReport = body;
     return route.fulfill({
-      json: { ...full, from: period.from, daily: full.daily.slice(-period.days), periods: [period] },
+      body, contentType: 'application/json',
       headers: { [cacheRemainingHeader]: '3600000' },
     });
   });
@@ -169,7 +160,7 @@ try {
   await page.getByRole('heading', { name: 'demo' }).waitFor();
   await page.getByText('最終集計から30時間以上経過しています。').waitFor();
   assert.equal(await page.locator('dl.cards dd').first().textContent(), '0');
-  publishedSnapshot = snapshot;
+  reportsAreCurrent = true;
   await page.clock.fastForward(5 * 60_000);
   assert.equal(await page.locator('dl.cards dd').first().textContent(), '0');
   await page.clock.fastForward(55 * 60_000);
@@ -180,12 +171,6 @@ try {
   await page.getByText(`${rangeStart(7)} から ${to} 未満 · UTC`).waitFor();
   await livePeriod.selectOption('30');
   await page.getByText(`${rangeStart(30)} から ${to} 未満 · UTC`).waitFor();
-  rejectRefresh = true;
-  await page.getByRole('button', { name: '最新の集計を読む' }).click();
-  await page.getByRole('alert').filter({ hasText: '前回の集計を表示しています' }).waitFor();
-  await page.getByLabel('集計 JSON を開く').setInputFiles(snapshot);
-  await page.getByText('ローカルファイルを表示中').waitFor();
-  assert.equal(await page.getByRole('alert').count(), 0);
   assert.equal(await page.locator('dl.cards dd').allTextContents().then((texts) => texts.join(',')), '1,1,1,2,1');
   const dailyPanel = page.getByRole('region', { name: '日次の推移' });
   const sourcePanel = page.getByRole('region', { name: '流入元別セッション' });
@@ -247,6 +232,17 @@ try {
         return canvas && canvas.getBoundingClientRect().width <= chart.getBoundingClientRect().width + 1;
       });
   });
+  await period.selectOption('30');
+  await page.getByText(`${rangeStart(30)} から ${to} 未満 · UTC`).waitFor();
+  rejectRefresh = true;
+  await page.getByRole('button', { name: '最新の集計を読む' }).click();
+  await page.getByRole('alert').filter({ hasText: '前回の集計を表示しています' }).waitFor();
+  assert.ok(receivedReport);
+  await writeFile(savedReport, receivedReport);
+  await page.getByLabel('集計 JSON を開く').setInputFiles(savedReport);
+  await page.getByText('ローカルファイルを表示中').waitFor();
+  assert.equal(await page.getByRole('alert').count(), 0);
+  assert.deepEqual(await page.locator('dl.cards dd').allTextContents(), ['1', '1', '1', '2', '1']);
   rejectRefresh = false;
   await page.reload();
   await goal.waitFor();
@@ -286,7 +282,6 @@ try {
   }
   assert.ok(limited, 'an isolated browser request burst must be limited');
   console.info('E2E passed: browser and Node trackers, Worker, R2, Parquet, DuckDB and Solid 2 dashboard.');
-  if (values['out-dir']) console.info(`Sample files saved in ${output}`);
 } finally {
   await browser?.close();
   await vite?.close();
